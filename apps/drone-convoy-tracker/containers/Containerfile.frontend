@@ -1,12 +1,16 @@
 # ==============================================================================
-# Dockerfile - Leptos Frontend (WASM)
-# Multi-stage build with Trunk + nginx
+# Containerfile - Leptos Frontend (WASM), served by nginx
+# Built with Podman:
+#   podman build -f containers/Containerfile.frontend -t drone-convoy-tracker-frontend .
+#
+# RUST_VERSION MUST BE >= 1.85 -- the workspace is edition 2024.
 # ==============================================================================
 
 # -----------------------------------------------------------------------------
 # Stage 1: Build WASM
 # -----------------------------------------------------------------------------
-FROM rust:1.83-slim-bookworm AS builder
+ARG RUST_VERSION=1.89
+FROM docker.io/library/rust:${RUST_VERSION}-slim-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -34,10 +38,10 @@ RUN trunk build --release
 # -----------------------------------------------------------------------------
 # Stage 2: Nginx Runtime
 # -----------------------------------------------------------------------------
-FROM nginx:alpine AS runtime
+FROM docker.io/library/nginx:1.27-alpine AS runtime
 
 # Copy nginx config
-COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY containers/nginx.conf /etc/nginx/nginx.conf
 
 # Copy built assets
 COPY --from=builder /app/crates/drone-frontend/dist /usr/share/nginx/html
