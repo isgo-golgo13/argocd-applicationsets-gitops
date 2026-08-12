@@ -1,0 +1,16 @@
+cloudnative-pg:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  monitoring:
+    enablePodMonitor: true
+  config:
+    backup:
+      retentionPolicy: "30d"
+    recovery:
+      recoveryTarget: "latest"

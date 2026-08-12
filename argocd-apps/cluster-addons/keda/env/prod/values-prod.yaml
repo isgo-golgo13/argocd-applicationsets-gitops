@@ -1,0 +1,25 @@
+keda:
+  replicaCount: 2
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  webhooks:
+    failurePolicy: Fail
+  podDisruptionBudget:
+    enabled: true
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  operator:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true
+  metricsServer:
+    replicaCount: 2
+    podDisruptionBudget:
+      enabled: true

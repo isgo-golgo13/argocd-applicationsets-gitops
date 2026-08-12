@@ -1,0 +1,16 @@
+clusters:
+  - name: nonprod
+    url: https://k8s.nonprod.eql.cloud
+    valuesFile: values-nonprod.yaml
+
+  - name: preprod
+    url: https://k8s.preprod.eql.cloud
+    valuesFile: values-preprod.yaml
+
+  - name: uat
+    url: https://k8s.uat.eql.cloud
+    valuesFile: values-uat.yaml
+
+  - name: prod
+    url: https://k8s.prod.eql.cloud
+    valuesFile: values-prod.yaml

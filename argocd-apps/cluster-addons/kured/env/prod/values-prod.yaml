@@ -1,0 +1,17 @@
+kured:
+  configuration:
+    period: "0h07m0s"
+    rebootDays: ["Sun"]
+    startTime: "03:00"
+    endTime: "05:00"
+    timeZone: "UTC"
+    
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  metrics:
+    create: false

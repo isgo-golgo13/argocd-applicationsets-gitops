@@ -1,0 +1,8 @@
+apiVersion: v2
+name: cluster-api
+description: Cluster API for EQL Kubernetes Cluster Management (Auto-Cluster Upgrades)
+version: 1.0.0
+dependencies:
+  - name: cluster-api
+    version: 1.5.1
+    repository: https://kubernetes-sigs.github.io/cluster-api

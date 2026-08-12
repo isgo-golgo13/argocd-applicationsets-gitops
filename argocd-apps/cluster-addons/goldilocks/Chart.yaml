@@ -1,0 +1,8 @@
+apiVersion: v2
+name: goldilocks
+description: Goldilocks VPA recommendations for EQL clusters
+version: 1.0.0
+dependencies:
+  - name: goldilocks
+    version: 6.7.0
+    repository: https://charts.fairwinds.com/stable

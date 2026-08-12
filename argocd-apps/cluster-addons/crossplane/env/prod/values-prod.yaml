@@ -1,0 +1,19 @@
+crossplane:
+  replicaCount: 3
+  resourcesCrossplane:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  provider:
+    packages:
+      - gcp
+      - kubernetes
+  metrics:
+    enabled: true
+  rbacManager:
+    deploy: true
+  webhooks:
+    enabled: true

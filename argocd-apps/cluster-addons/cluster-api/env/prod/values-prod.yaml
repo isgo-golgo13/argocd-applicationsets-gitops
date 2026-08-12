@@ -1,0 +1,19 @@
+cluster-api:
+  core:
+    manager:
+      replicas: 3
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 200m
+          memory: 256Mi
+  kubeadmBootstrap:
+    manager:
+      replicas: 3
+  kubeadmControlPlane:
+    manager:
+      replicas: 3
+  metrics:
+    enabled: false

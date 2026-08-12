@@ -1,0 +1,8 @@
+apiVersion: v2
+name: external-secrets
+description: External Secrets Operator for EQL
+version: 1.0.0
+dependencies:
+  - name: external-secrets
+    version: 0.9.9
+    repository: https://charts.external-secrets.io

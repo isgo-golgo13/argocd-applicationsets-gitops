@@ -1,0 +1,36 @@
+goldilocks:
+  replicaCount: 2
+  dashboard:
+    replicaCount: 2
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: true
+      className: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts:
+        - host: goldilocks.prod.eql.cloud
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: goldilocks-tls
+          hosts:
+            - goldilocks.prod.eql.cloud
+  controller:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  dashboard:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi

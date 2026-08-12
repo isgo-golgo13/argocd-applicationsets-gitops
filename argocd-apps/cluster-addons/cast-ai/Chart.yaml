@@ -1,0 +1,8 @@
+apiVersion: v2
+name: cast-ai
+description: CAST AI cost opts operator for EQL clusters
+version: 1.0.0
+dependencies:
+  - name: cast-ai-agent
+    version: 1.26.0
+    repository: https://castai.github.io/helm-charts

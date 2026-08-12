@@ -1,0 +1,5 @@
+apiVersion: v2
+name: app-sets
+description: "ApplicationSets for deploying cluster-addons and cluster-apps"
+version: 1.0.0
+appVersion: "1.0"

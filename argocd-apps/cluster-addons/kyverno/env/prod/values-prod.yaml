@@ -1,0 +1,19 @@
+kyverno:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  metrics:
+    enabled: false
+  admissionController:
+    replicas: 3
+  background:
+    replicas: 3
+  cleanupController:
+    replicas: 3
+  reportsController:
+    replicas: 3

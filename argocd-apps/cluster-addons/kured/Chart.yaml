@@ -1,0 +1,8 @@
+apiVersion: v2
+name: kured
+description: Kured for EQL Node Reboot Management
+version: 1.0.0
+dependencies:
+  - name: kured
+    version: 4.2.0
+    repository: https://kubereboot.github.io/charts

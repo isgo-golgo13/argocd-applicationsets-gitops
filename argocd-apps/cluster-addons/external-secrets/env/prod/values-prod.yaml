@@ -1,0 +1,17 @@
+external-secrets:
+  replicaCount: 3
+  webhook:
+    replicaCount: 3
+  certController:
+    replicaCount: 3
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false

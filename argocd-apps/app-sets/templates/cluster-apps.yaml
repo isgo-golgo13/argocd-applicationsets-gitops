@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-apps
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+{{- range .Values.clusters }}
+                - cluster: {{ .name }}
+                  url: {{ .url }}
+                  values: {{ .valuesFile }}
+{{- end }}
+          - git:
+              repoURL: https://github.com/eqlgames/eql-argocd-apps
+              revision: HEAD
+              directories:
+                - path: cluster-apps/*
+  template:
+    metadata:
+      name: '{{`{{ cluster }}`}}-{{`{{ path.basename }}`}}'
+      labels:
+        env: '{{`{{ cluster }}`}}'
+        type: cluster-apps
+    spec:
+      project: cluster-apps
+      source:
+        repoURL: https://github.com/eqlgames/eql-argocd-apps
+        targetRevision: HEAD
+        path: '{{`{{ path }}`}}'
+        helm:
+          valueFiles:
+            - env/{{`{{ cluster }}`}}/{{`{{ values }}`}}
+      destination:
+        server: '{{`{{ url }}`}}'
+        namespace: '{{`{{ cluster }}`}}-{{`{{ path.basename }}`}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

@@ -1,0 +1,94 @@
+cert-manager:
+  installCRDs: true
+  
+  replicaCount: 2
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 200m
+      memory: 512Mi
+
+  prometheus:
+    enabled: true
+    servicemonitor:
+      enabled: true
+      prometheusInstance: monitoring
+      
+  webhook:
+    replicaCount: 2
+    timeoutSeconds: 10
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  cainjector:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  podDnsPolicy: None
+  podDnsConfig:
+    nameservers:
+      - "8.8.8.8"
+      - "1.1.1.1"
+
+  # High availability settings
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Security settings
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  # Global configuration
+  global:
+    logLevel: 2
+    leaderElection:
+      namespace: cert-manager
+
+  extraArgs:
+    - --dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53
+    - --enable-certificate-owner-ref=true
+    - --feature-gates=AdditionalCertificateOutputFormats=true
+
+  nodeSelector:
+    kubernetes.io/os: linux
+
+  tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/master
+      operator: Exists
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - cert-manager
+            topologyKey: kubernetes.io/hostname
