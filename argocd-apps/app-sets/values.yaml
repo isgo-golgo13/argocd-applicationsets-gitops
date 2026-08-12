@@ -1,20 +1,77 @@
+# ---------------------------------------------------------------------------
+# app-sets/values.yaml
+#
+# Single source of truth for repository location, cluster topology, AppProject
+# names and sync-wave ordering. Repointing this whole repo at another Git org
+# is a one-line change here -- nothing under templates/ hardcodes a URL.
+# ---------------------------------------------------------------------------
+
+repo:
+  # CHANGE ME at fork time. Must match the AppProject sourceRepos glob in
+  # cluster-addons/argocd/values.yaml, or every generated Application will be
+  # rejected by its project.
+  url: https://github.com/CHANGEME-ORG/argocd-applicationsets-gitops
+  revision: HEAD
+
+# Paths are relative to the REPOSITORY ROOT, not to this chart.
+paths:
+  addons: argocd-apps/cluster-addons
+  apps: argocd-apps/cluster-apps
+
+projects:
+  addons: cluster-addons
+  apps: cluster-apps
+
+# Target clusters. Each entry pairs a cluster with the env overlay file that
+# lives inside every chart at env/<name>/<valuesFile>.
+#
+# Post-delivery refinement: once cluster-secrets/ is populated this list can be
+# replaced by a cluster generator with label selectors (env: prod), at which
+# point adding a cluster becomes a Secret rather than a repo edit.
 clusters:
   - name: nonprod
-    url: https://k8s.nonprod.xxx.cloud
+    url: https://k8s.nonprod.example.internal
     valuesFile: values-nonprod.yaml
 
   - name: preprod
-    url: https://k8s.preprod.xxx.cloud
+    url: https://k8s.preprod.example.internal
     valuesFile: values-preprod.yaml
 
   - name: uat
-    url: https://k8s.uat.xxx.cloud
+    url: https://k8s.uat.example.internal
     valuesFile: values-uat.yaml
 
   - name: prod
-    url: https://k8s.prod.xxx.cloud
+    url: https://k8s.prod.example.internal
     valuesFile: values-prod.yaml
 
+# ---------------------------------------------------------------------------
+# Sync-wave ordering for cluster-addons.
+#
+# CRD-providing addons must reconcile before anything that consumes their CRDs.
+# Each group below becomes its own matrix generator scoped to those directories
+# and stamped with that wave. Any addon directory NOT named here is picked up by
+# the catch-all glob and lands in addonDefaultWave -- so dropping in a new addon
+# still works with zero edits, it just sorts last.
+# ---------------------------------------------------------------------------
+addonWaves:
+  # Wave -2: CRDs and the secret-delivery path first.
+  - wave: "-2"
+    dirs:
+      - cert-manager
+      - external-secrets
+      - sealed-secrets
 
-repoURL:  
-  name: https://github.com/xxxxxx/argocd-apps
+  # Wave -1: controllers owning CRDs consumed by workloads and by each other.
+  - wave: "-1"
+    dirs:
+      - kyverno
+      - crossplane
+      - cluster-api
+      - keda
+      - cnpg
+
+addonDefaultWave: "0"
+
+# All cluster-apps land after every addon.
+appWave: "10"

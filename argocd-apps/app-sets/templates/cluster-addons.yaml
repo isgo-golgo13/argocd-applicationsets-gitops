@@ -1,42 +1,108 @@
+{{- $repo := .Values.repo -}}
+{{- $paths := .Values.paths -}}
+# ---------------------------------------------------------------------------
+# cluster-addons ApplicationSet
+#
+# Ordering matters here: CRD-providing addons must reconcile before their
+# consumers. Each sync-wave group in values.yaml becomes its own matrix
+# generator (clusters x directories) stamped with that wave via the git
+# generator's values block. A catch-all glob picks up every directory not
+# claimed by an explicit group, so adding an addon still requires no template
+# edit -- it simply sorts into addonDefaultWave.
+#
+# Deletion posture is deliberately protective: this ApplicationSet governs the
+# entire platform layer, so Applications are never deleted by the controller and
+# their child resources survive Application deletion. See the README section
+# "Blast radius" -- this is the first objection an app-of-apps holdout raises.
+# ---------------------------------------------------------------------------
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: cluster-addons
   namespace: argocd
+  # Required for applicationsSync: create-update to survive deletion of THIS
+  # ApplicationSet. Without the finalizer the Application controller still
+  # garbage-collects the generated Applications via ownerReferences.
+  # Use background cascading deletion; foreground gives no guarantee.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
+  goTemplate: true
+  # missingkey=error is the point of the exercise: a mistyped key must fail
+  # loudly rather than render an empty string and silently generate a malformed
+  # Application.
+  goTemplateOptions: ["missingkey=error"]
+
+  syncPolicy:
+    # Controller may create and update, never delete.
+    # NOTE: per-ApplicationSet applicationsSync is ignored unless the controller
+    # runs with --enable-policy-override (or applicationsetcontroller.enable.policy.override
+    # in argocd-cmd-params-cm). That flag is set in cluster-addons/argocd/values.yaml.
+    applicationsSync: create-update
+    # Deleting an Application leaves its cluster resources in place.
+    preserveResourcesOnDeletion: true
+
   generators:
+{{- range .Values.addonWaves }}
+    # --- sync wave {{ .wave }} ---
     - matrix:
         generators:
           - list:
               elements:
-{{- range .Values.clusters }}
-                - cluster: {{ .name }}
-                  url: {{ .url }}
-                  values: {{ .valuesFile }}
-{{- end }}
+{{- include "appset.clusterElements" $ | nindent 16 }}
           - git:
-              repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
-              revision: HEAD
+              repoURL: {{ $repo.url }}
+              revision: {{ $repo.revision }}
+              values:
+                wave: {{ .wave | quote }}
               directories:
-                - path: cluster-addons/*
+{{- range .dirs }}
+                - path: {{ $paths.addons }}/{{ . }}
+{{- end }}
+{{- end }}
+    # --- catch-all: every addon directory not claimed above ---
+    - matrix:
+        generators:
+          - list:
+              elements:
+{{- include "appset.clusterElements" $ | nindent 16 }}
+          - git:
+              repoURL: {{ $repo.url }}
+              revision: {{ $repo.revision }}
+              values:
+                wave: {{ .Values.addonDefaultWave | quote }}
+              directories:
+                - path: {{ $paths.addons }}/*
+{{- range .Values.addonWaves }}
+{{- range .dirs }}
+                - path: {{ $paths.addons }}/{{ . }}
+                  exclude: true
+{{- end }}
+{{- end }}
+
   template:
     metadata:
-      name: '{{`{{ cluster }}`}}-{{`{{ path.basename }}`}}'
+      name: '{{ include "appset.appName" . }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ include "appset.wave" . }}'
       labels:
-        env: '{{`{{ cluster }}`}}'
-        type: cluster-addons
+        env: '{{ include "appset.cluster" . }}'
+        appset.gitops/type: cluster-addons
     spec:
-      project: cluster-addons
+      project: {{ .Values.projects.addons }}
       source:
-        repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
-        targetRevision: HEAD
-        path: '{{`{{ path }}`}}'
+        repoURL: {{ $repo.url }}
+        targetRevision: {{ $repo.revision }}
+        path: '{{ include "appset.path" . }}'
         helm:
+          # An addon that does not yet carry an overlay for every environment
+          # still renders, using its chart defaults, instead of failing sync.
+          ignoreMissingValueFiles: true
           valueFiles:
-            - env/{{`{{ cluster }}`}}/{{`{{ values }}`}}
+            - '{{ include "appset.valueFile" . }}'
       destination:
-        server: '{{`{{ url }}`}}'
-        namespace: '{{`{{ path.basename }}`}}'
+        server: '{{ include "appset.destServer" . }}'
+        namespace: '{{ include "appset.basename" . }}'
       syncPolicy:
         automated:
           prune: true

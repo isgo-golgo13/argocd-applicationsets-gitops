@@ -1,45 +1,73 @@
+{{- $repo := .Values.repo -}}
+{{- $paths := .Values.paths -}}
+# ---------------------------------------------------------------------------
+# cluster-apps ApplicationSet
+#
+# THIS is the pattern the delivery is selling: a developer drops a Helm chart
+# directory into argocd-apps/cluster-apps/, and the git directory generator
+# globs it up and deploys it to every target cluster. No Application.yaml is
+# written by hand, no shared file is edited, no platform-team ticket is raised.
+#
+# Deliberately different from cluster-addons in two ways:
+#   1. One generator, uniform wave. Application ordering is a platform concern,
+#      not an app concern -- apps land after the whole addon layer.
+#   2. Normal deletion semantics. Removing a chart directory removes the
+#      Application and its resources, which is the behaviour an app team
+#      expects from Git as the source of truth. The addon layer is the one that
+#      gets the protective posture.
+# ---------------------------------------------------------------------------
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: cluster-apps
   namespace: argocd
 spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
   generators:
     - matrix:
         generators:
           - list:
               elements:
-{{- range .Values.clusters }}
-                - cluster: {{ .name }}
-                  url: {{ .url }}
-                  values: {{ .valuesFile }}
-{{- end }}
+{{- include "appset.clusterElements" $ | nindent 16 }}
           - git:
-              repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
-              revision: HEAD
+              repoURL: {{ $repo.url }}
+              revision: {{ $repo.revision }}
+              values:
+                wave: {{ .Values.appWave | quote }}
               directories:
-                - path: cluster-apps/*
+                - path: {{ $paths.apps }}/*
+
   template:
     metadata:
-      name: '{{`{{ cluster }}`}}-{{`{{ path.basename }}`}}'
+      name: '{{ include "appset.appName" . }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{ include "appset.wave" . }}'
       labels:
-        env: '{{`{{ cluster }}`}}'
-        type: cluster-apps
+        env: '{{ include "appset.cluster" . }}'
+        appset.gitops/type: cluster-apps
     spec:
-      project: cluster-apps
+      project: {{ .Values.projects.apps }}
       source:
-        repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
-        targetRevision: HEAD
-        path: '{{`{{ path }}`}}'
+        repoURL: {{ $repo.url }}
+        targetRevision: {{ $repo.revision }}
+        path: '{{ include "appset.path" . }}'
         helm:
+          # Load-bearing for the drop-in story: a new chart that ships only
+          # env/nonprod/values-nonprod.yaml still generates valid Applications
+          # for all four clusters instead of breaking three of them. The app
+          # team promotes by adding overlay files, one environment at a time.
+          ignoreMissingValueFiles: true
           valueFiles:
-            - env/{{`{{ cluster }}`}}/{{`{{ values }}`}}
+            - '{{ include "appset.valueFile" . }}'
       destination:
-        server: '{{`{{ url }}`}}'
-        namespace: '{{`{{ cluster }}`}}-{{`{{ path.basename }}`}}'
+        server: '{{ include "appset.destServer" . }}'
+        namespace: '{{ include "appset.appNamespace" . }}'
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
+          - ServerSideApply=true

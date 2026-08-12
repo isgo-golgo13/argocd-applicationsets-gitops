@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# cluster-addons/argocd/values.yaml  --  COMMON base for all environments.
+#
+# env/<env>/values-<env>.yaml files are thin overlays layered on top of this by
+# the ApplicationSet's helm.valueFiles. Anything identical across environments
+# belongs here, not duplicated four times.
+# ---------------------------------------------------------------------------
+
+# AppProject policy. sourceRepos MUST match app-sets/values.yaml repo.url or
+# every generated Application is rejected by its project with a
+# "not permitted in project" error -- Applications appear, then refuse to sync.
+projects:
+  sourceRepos:
+    - https://github.com/CHANGEME-ORG/*
+
+argo-cd:
+  applicationSet:
+    enabled: true
+    # Required for spec.syncPolicy.applicationsSync to be honoured per
+    # ApplicationSet. Without it the controller-level --policy wins and
+    # cluster-addons loses its create-update deletion protection silently.
+    extraArgs:
+      - --enable-policy-override

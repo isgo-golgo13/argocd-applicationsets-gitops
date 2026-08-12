@@ -1,5 +1,10 @@
 apiVersion: v2
 name: app-sets
-description: "ApplicationSets for deploying cluster-addons and cluster-apps"
-version: 1.0.0
-appVersion: "1.0"
+description: >-
+  ApplicationSets that generate every cluster-addon and cluster-app Application.
+  Rendered by Helm; the manifests it produces are consumed by the ArgoCD
+  ApplicationSet controller. See templates/_helpers.tpl for the two-engine
+  templating contract.
+type: application
+version: 2.0.0
+appVersion: "2.0"
