@@ -1,16 +1,20 @@
 clusters:
   - name: nonprod
-    url: https://k8s.nonprod.eql.cloud
+    url: https://k8s.nonprod.xxx.cloud
     valuesFile: values-nonprod.yaml
 
   - name: preprod
-    url: https://k8s.preprod.eql.cloud
+    url: https://k8s.preprod.xxx.cloud
     valuesFile: values-preprod.yaml
 
   - name: uat
-    url: https://k8s.uat.eql.cloud
+    url: https://k8s.uat.xxx.cloud
     valuesFile: values-uat.yaml
 
   - name: prod
-    url: https://k8s.prod.eql.cloud
+    url: https://k8s.prod.xxx.cloud
     valuesFile: values-prod.yaml
+
+
+repoURL:  
+  name: https://github.com/xxxxxx/argocd-apps

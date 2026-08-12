@@ -15,7 +15,7 @@ spec:
                   values: {{ .valuesFile }}
 {{- end }}
           - git:
-              repoURL: https://github.com/eqlgames/eql-argocd-apps
+              repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
               revision: HEAD
               directories:
                 - path: cluster-apps/*
@@ -28,7 +28,7 @@ spec:
     spec:
       project: cluster-apps
       source:
-        repoURL: https://github.com/eqlgames/eql-argocd-apps
+        repoURL: https://github.com/argocd-applicationsets-gitops/argocd-apps
         targetRevision: HEAD
         path: '{{`{{ path }}`}}'
         helm:
