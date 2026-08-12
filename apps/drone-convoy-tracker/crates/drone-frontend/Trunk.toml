@@ -1,0 +1,48 @@
+# Trunk Build Configuration
+# https://trunkrs.dev/configuration/
+
+[build]
+# Build target directory
+target = "index.html"
+# Output directory
+dist = "dist"
+# Public URL base path
+public_url = "/"
+# Enable release optimizations
+release = false
+# Minify output in release mode
+minify = "on_release"
+# File hashing for cache busting
+filehash = true
+
+[watch]
+# Paths to watch for changes
+watch = ["src", "style", "assets", "index.html"]
+# Paths to ignore
+ignore = ["dist"]
+
+[serve]
+# Development server address
+address = "127.0.0.1"
+# Development server port
+port = 3000
+# Enable HTTPS
+open = false
+# Proxy API requests
+proxy_backend = "http://localhost:8080/graphql"
+proxy_rewrite = "/api/"
+
+[clean]
+# Directories to clean
+dist = "dist"
+cargo = false
+
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "echo 'Building Drone Frontend...'"]
+
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", "echo 'Build complete!'"]

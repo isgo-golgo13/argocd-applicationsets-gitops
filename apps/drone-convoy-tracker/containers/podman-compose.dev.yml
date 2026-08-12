@@ -1,0 +1,57 @@
+# Docker Compose - Development Environment
+# Start with: docker compose -f docker/docker-compose.dev.yml up -d
+
+services:
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: scylla
+    ports:
+      - "9042:9042"
+      - "9160:9160"
+      - "10000:10000"
+    volumes:
+      - scylla-data:/var/lib/scylla
+    command: --smp 2 --memory 2G --overprovisioned 1 --developer-mode 1
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "SELECT now() FROM system.local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - drone-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - drone-net
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - drone-net
+
+volumes:
+  scylla-data:
+  redis-data:
+
+networks:
+  drone-net:
+    driver: bridge

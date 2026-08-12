@@ -1,0 +1,46 @@
+[package]
+name = "drone-persistence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Repository pattern persistence layer with Redis cache-aside strategy for ScyllaDB"
+
+[features]
+default = ["scylla", "redis"]
+scylla = ["dep:scylla"]
+redis = ["dep:redis"]
+
+[dependencies]
+drone-domain = { path = "../drone-domain" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# ScyllaDB
+scylla = { workspace = true, optional = true }
+
+# Redis
+redis = { workspace = true, optional = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time & IDs
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Async traits
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+fake = { workspace = true }

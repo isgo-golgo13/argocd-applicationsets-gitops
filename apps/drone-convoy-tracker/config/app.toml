@@ -1,0 +1,115 @@
+# ==============================================================================
+# Drone Convoy Tracker - Application Configuration
+# ==============================================================================
+
+[server]
+addr = "0.0.0.0"
+port = 8080
+workers = 4
+keep_alive_secs = 75
+request_timeout_secs = 30
+
+[graphql]
+enable_playground = true
+enable_introspection = true
+max_depth = 10
+max_complexity = 1000
+batch_size = 100
+
+[scylla]
+hosts = ["localhost:9042"]
+keyspace = "drone_ops"
+datacenter = "datacenter1"
+replication_factor = 3
+
+[scylla.pool]
+size = 4
+connection_timeout_ms = 5000
+request_timeout_ms = 12000
+
+[scylla.retry]
+max_attempts = 3
+base_delay_ms = 100
+max_delay_ms = 5000
+
+[redis]
+url = "redis://localhost:6379"
+pool_size = 8
+connection_timeout_ms = 3000
+
+[redis.cache_ttl]
+leaderboard_secs = 300
+drone_state_secs = 60
+telemetry_secs = 10
+convoy_secs = 120
+
+[analytics]
+duckdb_path = "./data/analytics.duckdb"
+export_dir = "./data/exports"
+retention_days = 90
+
+[simulator]
+tick_interval_ms = 1000
+default_drone_count = 4
+mission_duration_ticks = 300
+engagement_probability = 0.3
+
+[simulator.kandahar_aor]
+center_lat = 31.6289
+center_lon = 65.7372
+radius_km = 50.0
+base_altitude_m = 5000.0
+
+[logging]
+level = "info"
+format = "json"
+include_target = true
+include_line_number = false
+
+[metrics]
+enabled = true
+port = 9090
+path = "/metrics"
+
+[tracing]
+enabled = false
+endpoint = "http://localhost:4317"
+sample_rate = 0.1
+
+# Platform-specific configurations
+[platforms.mq9_reaper]
+max_speed_mps = 130
+cruise_speed_mps = 80
+max_altitude_m = 15000
+fuel_capacity_hours = 27
+typical_payload = ["AGM114_HELLFIRE", "GBU12_PAVEWAY"]
+
+[platforms.mq1c_gray_eagle]
+max_speed_mps = 85
+cruise_speed_mps = 60
+max_altitude_m = 8800
+fuel_capacity_hours = 25
+typical_payload = ["AGM114_HELLFIRE", "GBU44"]
+
+[platforms.rq4_global_hawk]
+max_speed_mps = 175
+cruise_speed_mps = 155
+max_altitude_m = 18000
+fuel_capacity_hours = 32
+typical_payload = []  # ISR only
+
+# Weapon characteristics
+[weapons.agm114_hellfire]
+range_km = 8.0
+base_accuracy = 0.92
+guidance = "laser"
+
+[weapons.gbu12_paveway]
+range_km = 12.0
+base_accuracy = 0.88
+guidance = "laser"
+
+[weapons.gbu38_jdam]
+range_km = 15.0
+base_accuracy = 0.90
+guidance = "gps"

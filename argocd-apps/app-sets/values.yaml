@@ -63,13 +63,16 @@ addonWaves:
       - sealed-secrets
 
   # Wave -1: controllers owning CRDs consumed by workloads and by each other.
+  # scylla-operator sits here specifically because cert-manager (wave -2) must
+  # already be reconciled -- it issues the cert for the operator's webhook
+  # server. This is the concrete case the wave mechanism exists to solve.
   - wave: "-1"
     dirs:
       - kyverno
       - crossplane
       - cluster-api
       - keda
-      - cnpg
+      - scylla-operator
 
 addonDefaultWave: "0"
 

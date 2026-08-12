@@ -1,0 +1,20 @@
+# ---------------------------------------------------------------------------
+# cluster-addons/scylla-operator/values.yaml  --  COMMON base, all environments.
+#
+# Two upstream constraints drive this file, both worth reading before editing:
+#
+# 1. NAMESPACE IS FIXED. The ScyllaDB Operator must run in the `scylla-operator`
+#    namespace. The cluster-addons ApplicationSet derives the destination
+#    namespace from the chart directory name, so THIS DIRECTORY MUST STAY NAMED
+#    `scylla-operator`. Renaming it silently breaks the operator.
+#
+# 2. CERT-MANAGER IS A HARD DEPENDENCY. cert-manager issues the TLS certificate
+#    for the operator's webhook server. cert-manager is pinned to sync wave -2
+#    and this addon to wave -1 in app-sets/values.yaml, which is exactly why the
+#    wave mechanism exists. To supply your own certificate instead, set
+#    webhook.createSelfSignedCertificate: false and webhook.certificateSecretName.
+# ---------------------------------------------------------------------------
+
+scylla-operator:
+  webhook:
+    createSelfSignedCertificate: true

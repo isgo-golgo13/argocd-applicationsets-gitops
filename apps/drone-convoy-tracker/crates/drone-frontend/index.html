@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Drone Convoy Tracker - Tactical HUD for military drone operations">
+    <meta name="theme-color" content="#0a0f0d">
+    
+    <title>DRONE OPS | Convoy Tracker</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛩️</text></svg>">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin="">
+    
+    <!-- App CSS (injected by Trunk) -->
+    <link data-trunk rel="css" href="style/main.css">
+    
+    <style>
+        /* Critical CSS for initial load */
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #0a0f0d;
+            color: #e0ffe0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        /* Loading screen */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0a0f0d;
+            z-index: 10000;
+        }
+        
+        .loading-logo {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #00ff41;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+            margin-bottom: 24px;
+            letter-spacing: 0.1em;
+        }
+        
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid rgba(0, 255, 65, 0.2);
+            border-top-color: #00ff41;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        .loading-text {
+            margin-top: 24px;
+            font-size: 0.8rem;
+            color: #557755;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Hide loading screen when app loads */
+        body.loaded .loading-screen {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading screen (hidden when WASM loads) -->
+    <div class="loading-screen" id="loading">
+        <div class="loading-logo">DRONE OPS</div>
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Initializing Systems...</div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
+            crossorigin=""></script>
+    
+    <!-- ECharts for Charming -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    
+    <!-- WASM App (injected by Trunk) -->
+    <link data-trunk rel="rust" data-wasm-opt="z" data-bin="drone-frontend"/>
+    
+    <script>
+        // Hide loading screen when WASM is ready
+        window.addEventListener('wasm-loaded', function() {
+            document.body.classList.add('loaded');
+        });
+        
+        // Fallback: hide after timeout if event doesn't fire
+        setTimeout(function() {
+            document.body.classList.add('loaded');
+        }, 5000);
+    </script>
+</body>
+</html>

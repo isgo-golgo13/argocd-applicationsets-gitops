@@ -1,0 +1,10 @@
+# Environment overlay: prod.
+scylla-operator:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

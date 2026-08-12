@@ -1,0 +1,41 @@
+[package]
+name = "drone-analytics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "OLAP analytics engine for drone convoy historical analysis using DuckDB"
+
+[dependencies]
+# DuckDB for OLAP
+duckdb = { workspace = true, features = ["bundled"] }
+
+# Domain types
+drone-domain = { path = "../drone-domain" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Statistics
+statrs = "0.18"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = "3.14"

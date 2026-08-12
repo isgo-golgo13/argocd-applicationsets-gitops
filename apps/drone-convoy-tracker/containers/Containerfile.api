@@ -1,0 +1,86 @@
+# ==============================================================================
+# Containerfile - GraphQL API Server (drone-api)
+# Multi-stage build for a minimal production image. Built with Podman:
+#   podman build -f containers/Containerfile.api -t drone-convoy-tracker-api .
+#
+# RUST_VERSION MUST BE >= 1.85. The workspace declares edition = "2024", which
+# no earlier toolchain can parse -- the previous 1.83 base could never have
+# built this tree. Bump the default to current stable and keep it pinned;
+# `rust:latest` in a delivery artifact is not reproducible.
+# ==============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Build
+# -----------------------------------------------------------------------------
+ARG RUST_VERSION=1.89
+FROM docker.io/library/rust:${RUST_VERSION}-slim-bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build only the API package. `--package` already excludes the WASM frontend
+# and the DuckDB-bundled analytics crate, so the previous `sed -i` surgery on
+# Cargo.toml is unnecessary -- and it desynchronised Cargo.lock, which is why
+# --locked could never be used here.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked --package drone-graphql-api && \
+    cp target/release/drone-api /app/drone-api
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime
+# -----------------------------------------------------------------------------
+FROM docker.io/library/debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash drone
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/drone-api /app/drone-api
+
+# Set ownership
+RUN chown -R drone:drone /app
+
+USER drone
+
+# Build arguments for versioning
+ARG VERSION=unknown
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+
+ENV VERSION=${VERSION}
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+
+# Default environment
+ENV RUST_LOG=info
+ENV SERVER_ADDR=0.0.0.0:8080
+ENV SCYLLA_HOSTS=localhost:9042
+ENV SCYLLA_KEYSPACE=drone_ops
+ENV REDIS_URL=redis://localhost:6379
+ENV ENABLE_PLAYGROUND=true
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/drone-api"]

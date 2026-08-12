@@ -1,0 +1,36 @@
+# Prometheus Configuration for Drone Convoy Tracker
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'drone-convoy-tracker'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # GraphQL API metrics
+  - job_name: 'drone-api'
+    static_configs:
+      - targets: ['api:8080']
+    metrics_path: /metrics
+
+  # ScyllaDB metrics
+  - job_name: 'scylla'
+    static_configs:
+      - targets: ['scylla:9180']
+
+  # Redis metrics (requires redis_exporter)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']

@@ -1,0 +1,197 @@
+# Podman Compose - full local stack for drone-convoy-tracker.
+#
+#   podman-compose -f containers/podman-compose.yml up -d
+#
+# Every image is a fully-qualified name (docker.io/...). Podman has no implicit
+# registry the way Docker does; a bare `redis:7-alpine` either prompts for a
+# registry or fails outright under a locked registries.conf.
+#
+# The api/frontend images are tagged localhost/ because they are built here.
+# The Helm chart in argocd-apps/cluster-apps/drone-convoy-tracker consumes the
+# same Containerfiles, pushed to a real registry.
+
+services:
+  # =============================================================================
+  # Frontend - Leptos WASM served by nginx
+  # =============================================================================
+  frontend:
+    image: localhost/drone-convoy-tracker-frontend:dev
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.frontend
+    container_name: drone-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - drone-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =============================================================================
+  # GraphQL API Server
+  # =============================================================================
+  api:
+    image: localhost/drone-convoy-tracker-api:dev
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.api
+    container_name: drone-api
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info,drone_graphql_api=debug
+      - SERVER_ADDR=0.0.0.0:8080
+      - SCYLLA_HOSTS=scylla:9042
+      - SCYLLA_KEYSPACE=drone_ops
+      - REDIS_URL=redis://redis:6379
+      - ENABLE_PLAYGROUND=true
+    depends_on:
+      scylla-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - drone-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =============================================================================
+  # ScyllaDB - Primary OLTP Database
+  # =============================================================================
+  scylla:
+    image: docker.io/scylladb/scylla:6.2
+    container_name: scylla
+    ports:
+      - "9042:9042"
+    volumes:
+      - scylla-data:/var/lib/scylla
+      # Mounted read-only for the migrate job below. NOTE: the ScyllaDB image
+      # has no /docker-entrypoint-initdb.d hook (that is a Postgres/MySQL
+      # convention) -- CQL placed there is never executed. Schema is applied
+      # explicitly by the `scylla-init` service.
+      - ../schema/cql:/schema:ro
+    command: --smp 2 --memory 2G --overprovisioned 1 --developer-mode 1
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "SELECT now() FROM system.local"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - drone-net
+    restart: unless-stopped
+
+  # =============================================================================
+  # Schema migration - applies schema/cql/*.cql once ScyllaDB is healthy
+  # =============================================================================
+  scylla-init:
+    image: docker.io/scylladb/scylla:6.2
+    container_name: scylla-init
+    depends_on:
+      scylla:
+        condition: service_healthy
+    volumes:
+      - ../schema/cql:/schema:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+        for f in /schema/*.cql; do
+          echo "applying $${f}"
+          cqlsh scylla 9042 -f "$${f}"
+        done
+        echo "schema applied"
+    networks:
+      - drone-net
+    restart: "no"
+
+  # =============================================================================
+  # Redis - Cache Layer
+  # =============================================================================
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - drone-net
+    restart: unless-stopped
+
+  # =============================================================================
+  # Prometheus - Metrics Collection
+  # =============================================================================
+  prometheus:
+    image: docker.io/prom/prometheus:v3.1.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - drone-net
+    restart: unless-stopped
+
+  # =============================================================================
+  # Grafana - Dashboards
+  # =============================================================================
+  grafana:
+    image: docker.io/grafana/grafana:11.5.0
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - drone-net
+    restart: unless-stopped
+
+volumes:
+  scylla-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  drone-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

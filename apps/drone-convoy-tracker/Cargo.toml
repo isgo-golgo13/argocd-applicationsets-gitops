@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/drone-domain",
+    "crates/drone-persistence",
+    "crates/drone-graphql-api",
+    "crates/drone-analytics",
+    "crates/drone-frontend",
+    "crates/drone-simulator",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["CHANGEME-ORG"]
+license = "MIT"
+repository = "https://github.com/CHANGEME-ORG/argocd-applicationsets-gitops"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# ScyllaDB driver
+scylla = { version = "0.15", features = ["ssl"] }
+
+# Redis
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# GraphQL
+async-graphql = { version = "7.0", features = ["uuid", "chrono", "dataloader"] }
+async-graphql-axum = "7.0"
+
+# Web framework
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time & IDs
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Analytics (Step 4)
+duckdb = { version = "1.1" }
+arrow = "53"
+parquet = "53"
+
+# Frontend (Leptos)
+leptos = { version = "0.7", features = ["csr"] }
+leptos_router = { version = "0.7", features = ["csr"] }
+leptos_meta = { version = "0.7", features = ["csr"] }
+
+# Geo
+geo = "0.29"
+
+# Testing
+tokio-test = "0.4"
+fake = { version = "3.0", features = ["chrono", "uuid"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"

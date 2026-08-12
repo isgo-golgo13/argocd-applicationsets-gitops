@@ -1,0 +1,54 @@
+[package]
+name = "drone-graphql-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Production-grade GraphQL API service for drone convoy leaderboard and telemetry"
+
+[[bin]]
+name = "drone-api"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+drone-domain = { path = "../drone-domain" }
+drone-persistence = { path = "../drone-persistence" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# GraphQL
+async-graphql = { workspace = true }
+async-graphql-axum = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time & IDs
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Async utilities
+async-stream = "0.3"
+futures-util = "0.3"
+
+# Configuration
+dotenvy = "0.15"
+
+[dev-dependencies]
+tokio-test = { workspace = true }

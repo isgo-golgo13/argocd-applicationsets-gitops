@@ -1,0 +1,6 @@
+target/
+dist/
+.git/
+docs/
+**/*.md
+crates/drone-frontend/dist/

@@ -1,0 +1,251 @@
+//! Convoy-level simulation orchestrating multiple drones.
+
+use crate::engagement::{EngagementSimulator, SimulatedEngagement};
+use crate::flight::{FlightPathGenerator, Waypoint};
+use crate::telemetry::{TelemetryGenerator, TelemetrySnapshot};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use uuid::Uuid;
+
+/// Simulated drone in convoy.
+pub struct SimulatedDrone {
+    pub drone_id: Uuid,
+    pub callsign: String,
+    pub platform_type: String,
+    pub waypoints: Vec<Waypoint>,
+    pub telemetry_gen: TelemetryGenerator,
+    pub engagement_sim: EngagementSimulator,
+    pub total_engagements: u32,
+    pub successful_hits: u32,
+}
+
+impl SimulatedDrone {
+    /// Create a new simulated drone.
+    pub fn new(callsign: &str, platform_type: &str) -> Self {
+        let drone_id = Uuid::new_v4();
+        let mut flight_gen = FlightPathGenerator::kandahar();
+        let waypoints = flight_gen.generate_mission_path(callsign);
+        let telemetry_gen = TelemetryGenerator::new(drone_id, callsign, waypoints.clone());
+
+        Self {
+            drone_id,
+            callsign: callsign.to_string(),
+            platform_type: platform_type.to_string(),
+            waypoints,
+            telemetry_gen,
+            engagement_sim: EngagementSimulator::new(),
+            total_engagements: 0,
+            successful_hits: 0,
+        }
+    }
+
+    /// Get current accuracy percentage.
+    pub fn accuracy_pct(&self) -> f32 {
+        if self.total_engagements == 0 {
+            0.0
+        } else {
+            (self.successful_hits as f32 / self.total_engagements as f32) * 100.0
+        }
+    }
+}
+
+/// Convoy simulation state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConvoyState {
+    pub convoy_id: Uuid,
+    pub callsign: String,
+    pub mission_type: String,
+    pub status: ConvoyStatus,
+    pub start_time: DateTime<Utc>,
+    pub drone_count: usize,
+    pub progress_pct: f32,
+}
+
+/// Convoy operational status.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ConvoyStatus {
+    Planning,
+    Active,
+    Rtb,
+    Complete,
+    Abort,
+}
+
+/// Convoy simulator managing multiple drones.
+pub struct ConvoySimulator {
+    pub convoy_id: Uuid,
+    pub callsign: String,
+    pub mission_type: String,
+    pub drones: HashMap<Uuid, SimulatedDrone>,
+    pub status: ConvoyStatus,
+    pub start_time: DateTime<Utc>,
+    mission_progress: f64,
+}
+
+impl ConvoySimulator {
+    /// Create a new convoy simulation.
+    pub fn new(callsign: &str, mission_type: &str, drone_count: usize) -> Self {
+        let convoy_id = Uuid::new_v4();
+        let mut drones = HashMap::new();
+
+        // Generate drones with military callsigns
+        let platforms = ["MQ9_REAPER", "MQ1C_GRAY_EAGLE", "RQ4_GLOBAL_HAWK"];
+        for i in 0..drone_count {
+            let drone_callsign = format!("{}-{:02}", callsign, i + 1);
+            let platform = platforms[i % platforms.len()];
+            let drone = SimulatedDrone::new(&drone_callsign, platform);
+            drones.insert(drone.drone_id, drone);
+        }
+
+        Self {
+            convoy_id,
+            callsign: callsign.to_string(),
+            mission_type: mission_type.to_string(),
+            drones,
+            status: ConvoyStatus::Active,
+            start_time: Utc::now(),
+            mission_progress: 0.0,
+        }
+    }
+
+    /// Advance mission progress.
+    pub fn advance(&mut self, delta_progress: f64) {
+        self.mission_progress = (self.mission_progress + delta_progress).min(1.0);
+
+        if self.mission_progress >= 0.9 {
+            self.status = ConvoyStatus::Rtb;
+        }
+        if self.mission_progress >= 1.0 {
+            self.status = ConvoyStatus::Complete;
+        }
+    }
+
+    /// Get current convoy state.
+    pub fn state(&self) -> ConvoyState {
+        ConvoyState {
+            convoy_id: self.convoy_id,
+            callsign: self.callsign.clone(),
+            mission_type: self.mission_type.clone(),
+            status: self.status,
+            start_time: self.start_time,
+            drone_count: self.drones.len(),
+            progress_pct: (self.mission_progress * 100.0) as f32,
+        }
+    }
+
+    /// Generate telemetry for all drones.
+    pub fn generate_telemetry(&mut self) -> Vec<TelemetrySnapshot> {
+        let progress = self.mission_progress;
+        self.drones
+            .values_mut()
+            .filter_map(|drone| drone.telemetry_gen.next_snapshot(progress))
+            .collect()
+    }
+
+    /// Simulate engagements for drones in target area.
+    pub fn simulate_engagements(&mut self) -> Vec<SimulatedEngagement> {
+        // Only simulate engagements in middle phase of mission
+        if self.mission_progress < 0.25 || self.mission_progress > 0.75 {
+            return vec![];
+        }
+
+        let convoy_id = self.convoy_id;
+        let mut engagements = Vec::new();
+
+        for drone in self.drones.values_mut() {
+            // Random chance of engagement per tick
+            if rand::random::<f32>() > 0.3 {
+                continue;
+            }
+
+            let altitude = drone.waypoints
+                .get(drone.telemetry_gen.current_waypoint())
+                .map(|wp| wp.coordinates.altitude_m)
+                .unwrap_or(5000.0);
+
+            let engagement = drone.engagement_sim.simulate_engagement(
+                convoy_id,
+                drone.drone_id,
+                &drone.callsign,
+                altitude,
+            );
+
+            drone.total_engagements += 1;
+            if engagement.hit {
+                drone.successful_hits += 1;
+            }
+
+            engagements.push(engagement);
+        }
+
+        engagements
+    }
+
+    /// Get leaderboard sorted by accuracy.
+    pub fn leaderboard(&self) -> Vec<LeaderboardEntry> {
+        let mut entries: Vec<_> = self.drones.values()
+            .map(|d| LeaderboardEntry {
+                drone_id: d.drone_id,
+                callsign: d.callsign.clone(),
+                platform_type: d.platform_type.clone(),
+                accuracy_pct: d.accuracy_pct(),
+                total_engagements: d.total_engagements,
+                successful_hits: d.successful_hits,
+                rank: 0, // Will be set after sorting
+            })
+            .collect();
+
+        // total_cmp is a total order over f64, so a NaN accuracy sorts last
+        // instead of panicking mid-sort.
+        entries.sort_by(|a, b| b.accuracy_pct.total_cmp(&a.accuracy_pct));
+
+        for (i, entry) in entries.iter_mut().enumerate() {
+            entry.rank = i as u32 + 1;
+        }
+
+        entries
+    }
+}
+
+/// Leaderboard entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    pub drone_id: Uuid,
+    pub callsign: String,
+    pub platform_type: String,
+    pub accuracy_pct: f32,
+    pub total_engagements: u32,
+    pub successful_hits: u32,
+    #[serde(default)]
+    pub rank: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_convoy() {
+        let convoy = ConvoySimulator::new("ALPHA", "STRIKE", 4);
+        assert_eq!(convoy.drones.len(), 4);
+        assert_eq!(convoy.status, ConvoyStatus::Active);
+    }
+
+    #[test]
+    fn test_advance_mission() {
+        let mut convoy = ConvoySimulator::new("BRAVO", "ISR", 2);
+        convoy.advance(0.5);
+        assert!((convoy.state().progress_pct - 50.0).abs() < 0.1);
+
+        convoy.advance(0.5);
+        assert_eq!(convoy.status, ConvoyStatus::Complete);
+    }
+
+    #[test]
+    fn test_generate_telemetry() {
+        let mut convoy = ConvoySimulator::new("CHARLIE", "STRIKE", 3);
+        let telemetry = convoy.generate_telemetry();
+        assert_eq!(telemetry.len(), 3);
+    }
+}

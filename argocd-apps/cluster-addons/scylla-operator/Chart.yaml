@@ -1,0 +1,14 @@
+apiVersion: v2
+name: scylla-operator
+description: >-
+  ScyllaDB Operator -- the CQL data plane for cluster-apps. Wrapper chart around
+  the upstream scylla-operator chart. The operator installs the ScyllaCluster,
+  ScyllaDBMonitoring and NodeConfig CRDs; individual application charts declare
+  their own ScyllaCluster against them.
+type: application
+version: 1.0.0
+dependencies:
+  - name: scylla-operator
+    # Re-pin against `helm search repo scylla-operator --versions` before delivery.
+    version: 1.21.0
+    repository: https://scylla-operator-charts.storage.googleapis.com/stable

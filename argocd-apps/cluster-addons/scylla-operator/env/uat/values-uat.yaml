@@ -1,0 +1,3 @@
+# Environment overlay: uat. Thin by design -- anything identical across
+# environments belongs in ../../values.yaml, not duplicated here.
+scylla-operator: {}
