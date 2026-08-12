@@ -75,3 +75,24 @@ unsafe_code = "forbid"
 all = "warn"
 pedantic = "warn"
 nursery = "warn"
+
+# ---------------------------------------------------------------------------
+# Release profile.
+#
+# These settings MUST live here and not in RUSTFLAGS. Cargo compiles build
+# scripts and proc-macros for the host with `-C embed-bitcode=no`, and forcing
+# `-C lto` globally through RUSTFLAGS contradicts that -- rustc then rejects
+# the combination and every proc-macro dependency fails to compile.
+# Declared as a profile, Cargo applies LTO only where it is valid.
+# ---------------------------------------------------------------------------
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+# The WASM bundle optimises for size, not speed. Per-package overrides may set
+# opt-level and codegen-units; `lto` and `panic` are workspace-wide only, which
+# is why the frontend crate no longer carries its own [profile.release].
+[profile.release.package.drone-frontend]
+opt-level = "z"

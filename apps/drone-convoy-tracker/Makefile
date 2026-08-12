@@ -46,7 +46,15 @@ FRONTEND_DIR := $(ROOT_DIR)/crates/drone-frontend
 SCHEMA_DIR := $(ROOT_DIR)/schema
 
 CARGO := cargo
-RUSTFLAGS_RELEASE := -C target-cpu=native -C opt-level=3 -C lto=fat -C codegen-units=1
+# Codegen settings (opt-level, lto, codegen-units) live in [profile.release] in
+# Cargo.toml -- see the note there. Leave this empty unless you have a reason.
+#
+# `-C target-cpu=native` is the one flag worth adding by hand, and only for a
+# local build: it produces binaries that may not run on another CPU, and it
+# makes `cargo build` and `cargo check` disagree on fingerprints, so every
+# switch between them recompiles the world.
+#   make build RUSTFLAGS_RELEASE="-C target-cpu=native"
+RUSTFLAGS_RELEASE ?=
 CARGO_BUILD_JOBS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 TRUNK := trunk
