@@ -365,3 +365,36 @@ body {
     .mission-clock { gap: var(--space-md); }
     .clock-value { font-size: 1rem; }
 }
+
+/* ---------------------------------------------------------------------------
+   Drone map markers (Leaflet divIcon). The SVG is inlined by map.rs; these
+   rules give it a transparent frame and spin the propeller while airborne.
+   --------------------------------------------------------------------------- */
+.drone-div-icon {
+  background: none;
+  border: none;
+}
+
+.drone-marker {
+  transform-origin: 50% 50%;
+  transition: transform 900ms linear;
+  will-change: transform;
+}
+
+.drone-marker svg { display: block; width: 100%; height: 100%; }
+
+.drone-marker .drone-prop {
+  animation: drone-prop-spin 260ms linear infinite;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+@keyframes drone-prop-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drone-marker { transition: none; }
+  .drone-marker .drone-prop { animation: none; }
+}

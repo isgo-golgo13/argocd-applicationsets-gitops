@@ -7,6 +7,26 @@ use wasm_bindgen::prelude::*;
 
 use crate::state::use_app_state;
 
+/// Airframe marker, compiled in from assets/images so there is no runtime fetch
+/// and no asset path to get wrong in the WASM bundle.
+const DRONE_SVG: &str = include_str!("../../../../assets/images/drone.svg");
+
+/// Marker accent per status. Light red is the default so drones read as hostile
+/// air against the green HUD; amber and grey call out the exceptions.
+fn status_accent(status: &crate::state::DroneStatus) -> &'static str {
+    use crate::state::DroneStatus;
+    match status {
+        DroneStatus::Rtb | DroneStatus::Egress => "#ffae2b",
+        DroneStatus::Landed | DroneStatus::Maintenance | DroneStatus::Preflight => "#6b7280",
+        DroneStatus::Airborne | DroneStatus::Loiter | DroneStatus::Ingress => "#ff5f5f",
+    }
+}
+
+/// Strip the XML prolog: valid in a standalone file, invalid inside innerHTML.
+fn inline_svg(svg: &str) -> &str {
+    svg.find("<svg").map_or(svg, |i| &svg[i..])
+}
+
 /// Leaflet map wrapper
 #[wasm_bindgen]
 extern "C" {
@@ -42,6 +62,12 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = setLatLng)]
     fn set_lat_lng(this: &Marker, lat_lng: &JsValue);
+
+    #[wasm_bindgen(js_namespace = L)]
+    type DivIcon;
+
+    #[wasm_bindgen(js_namespace = L, js_name = divIcon)]
+    fn div_icon(options: &JsValue) -> DivIcon;
 
     #[wasm_bindgen(js_namespace = L)]
     type Polyline;
@@ -154,7 +180,36 @@ pub fn MapPanel() -> impl IntoView {
                 marker_pos.push(&JsValue::from_f64(pos.latitude));
                 marker_pos.push(&JsValue::from_f64(pos.longitude));
 
+                let accent = status_accent(&drone.status);
+                let html = format!(
+                    "<div class=\"drone-marker\" style=\"--drone-accent:{accent};\
+                     width:38px;height:38px;transform:rotate({heading:.0}deg);\
+                     filter:drop-shadow(0 0 4px {accent});\">{svg}</div>",
+                    accent = accent,
+                    heading = pos.heading_deg,
+                    svg = inline_svg(DRONE_SVG),
+                );
+
+                let icon_options = js_sys::Object::new();
+                js_sys::Reflect::set(&icon_options, &"html".into(), &html.as_str().into()).ok();
+                js_sys::Reflect::set(&icon_options, &"className".into(), &"drone-div-icon".into()).ok();
+                let icon_size = js_sys::Array::new();
+                icon_size.push(&JsValue::from_f64(38.0));
+                icon_size.push(&JsValue::from_f64(38.0));
+                js_sys::Reflect::set(&icon_options, &"iconSize".into(), &icon_size.into()).ok();
+                let icon_anchor = js_sys::Array::new();
+                icon_anchor.push(&JsValue::from_f64(19.0));
+                icon_anchor.push(&JsValue::from_f64(19.0));
+                js_sys::Reflect::set(&icon_options, &"iconAnchor".into(), &icon_anchor.into()).ok();
+
                 let marker_options = js_sys::Object::new();
+                js_sys::Reflect::set(
+                    &marker_options,
+                    &"icon".into(),
+                    &JsValue::from(div_icon(&icon_options.into())),
+                )
+                .ok();
+
                 let marker = create_marker(&marker_pos.into(), &marker_options.into());
                 
                 let popup_content = format!(

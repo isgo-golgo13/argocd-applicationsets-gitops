@@ -85,8 +85,21 @@ pub struct ConvoySimulator {
 
 impl ConvoySimulator {
     /// Create a new convoy simulation.
+    /// Well-known demo convoy. The API's `activeConvoys` resolver currently
+    /// returns this same id, so the dashboard, the simulator's writes and the
+    /// leaderboard reads all agree on one convoy. A random id here means the
+    /// simulator writes to a convoy the UI never asks about, and every panel
+    /// stays empty while both processes look healthy.
+    ///
+    /// Override with DRONE_CONVOY_ID once the convoy repository is wired up.
+    pub const DEMO_CONVOY_ID: &'static str = "550e8400-e29b-41d4-a716-446655440000";
+
     pub fn new(callsign: &str, mission_type: &str, drone_count: usize) -> Self {
-        let convoy_id = Uuid::new_v4();
+        let convoy_id = std::env::var("DRONE_CONVOY_ID")
+            .ok()
+            .and_then(|raw| Uuid::parse_str(&raw).ok())
+            .or_else(|| Uuid::parse_str(Self::DEMO_CONVOY_ID).ok())
+            .unwrap_or_else(Uuid::new_v4);
         let mut drones = HashMap::new();
 
         // Generate drones with military callsigns

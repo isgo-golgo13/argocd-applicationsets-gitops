@@ -11,15 +11,26 @@ pub mod state;
 
 use chrono::Utc;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use uuid::Uuid;
 
 use components::*;
+use wasm_bindgen::JsCast;
 use state::*;
+
+/// Leaderboard poll interval. The GraphQL subscription route is not yet mounted
+/// server-side, so the dashboard pulls rather than being pushed to. Swap this
+/// for `use_websocket` once `/graphql/ws` is enabled.
+const POLL_INTERVAL_MS: i32 = 2_000;
 
 #[component]
 pub fn App() -> impl IntoView {
     provide_app_state();
-    load_mock_data();
+    // Positions and the engagement feed still come from a seed: the resolvers
+    // behind them are stubs (see start_live_feed).
+    seed_static_panels();
+    // The leaderboard is real: simulator -> recordEngagement -> ScyllaDB -> here.
+    start_live_feed();
 
     view! {
         <div class="scanlines"></div>
@@ -74,7 +85,75 @@ fn ToastContainer() -> impl IntoView {
     }
 }
 
-fn load_mock_data() {
+/// Poll the real leaderboard and push it into state.
+///
+/// This is the one path that is live end to end today. `recordEngagement`
+/// writes through `ScyllaLeaderboardRepository`, and the `leaderboard` query
+/// reads back from it -- no stub in between.
+///
+/// `ws_connected` now reflects whether the last poll actually succeeded,
+/// instead of being set to true unconditionally.
+fn start_live_feed() {
+    let state = use_app_state();
+
+    spawn_local(async move {
+        match services::fetch_active_convoys().await {
+            Ok(convoys) => {
+                if let Some(first) = convoys.first() {
+                    if let Ok(id) = Uuid::parse_str(&first.convoy_id) {
+                        state.selected_convoy.set(Some(id));
+                        log::info!("tracking convoy {} ({})", first.callsign, id);
+                    }
+                }
+            }
+            Err(err) => {
+                log::error!("could not list convoys: {err}");
+                state.ws_connected.set(false);
+            }
+        }
+
+        poll_leaderboard(state);
+    });
+}
+
+fn poll_leaderboard(state: AppState) {
+    let tick = move || {
+        spawn_local(async move {
+            let Some(convoy_id) = state.selected_convoy.get_untracked() else {
+                return;
+            };
+            match services::fetch_leaderboard(convoy_id, 10).await {
+                Ok(entries) => {
+                    state.ws_connected.set(true);
+                    state.leaderboard.set(entries);
+                }
+                Err(err) => {
+                    state.ws_connected.set(false);
+                    log::warn!("leaderboard poll failed: {err}");
+                }
+            }
+        });
+    };
+
+    tick();
+
+    let closure = wasm_bindgen::closure::Closure::wrap(Box::new(tick) as Box<dyn Fn()>);
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            POLL_INTERVAL_MS,
+        );
+    }
+    // Deliberately leaked: the interval outlives this scope for the life of the
+    // page. Dropping the closure here would invalidate the callback.
+    closure.forget();
+}
+
+/// Seed for the panels whose resolvers are still stubs: drone positions,
+/// telemetry and the engagement feed. Everything here is placeholder data and
+/// is replaced the moment `getDrones` / `engagements` are wired to their
+/// repositories -- which already exist in drone-persistence.
+fn seed_static_panels() {
     let state = use_app_state();
     state.mission_start.set(Some(Utc::now() - chrono::Duration::hours(2)));
 
@@ -158,7 +237,6 @@ fn load_mock_data() {
         EngagementEvent { id: Uuid::new_v4(), drone_id: Uuid::new_v4(), callsign: "SHADOW-12".into(), hit: false, weapon_type: "AGM114_HELLFIRE".into(), new_accuracy_pct: 88.9, timestamp: Utc::now() - chrono::Duration::minutes(18) },
     ];
     state.engagements.set(engagements);
-    state.ws_connected.set(true);
 }
 
 pub fn main() {

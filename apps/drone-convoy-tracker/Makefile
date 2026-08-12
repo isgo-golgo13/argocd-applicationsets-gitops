@@ -87,9 +87,9 @@ NC := \033[0m
 # ==============================================================================
 # FRONT DOOR -- the only targets you need day to day.
 #
-#   make serve    build images and run the whole stack, then open the dashboard
-#   make stop     tear the stack down
-#   make logs     follow stack logs
+#   make serve    run API + dashboard NATIVELY (only ScyllaDB/Redis in podman)
+#   make stop     stop ScyllaDB and Redis
+#   make logs     follow ScyllaDB logs
 #   make build    compile everything locally (backend + frontend WASM)
 #   make dev      run API + frontend with hot reload against a local DB
 #   make test     workspace tests
@@ -114,52 +114,92 @@ NC := \033[0m
 # ==============================================================================
 
 .PHONY: serve
-serve:
-	@printf "$(CYAN)▶ Building images and starting the stack...$(NC)\n"
-	@$(COMPOSE) -f containers/podman-compose.yml up -d --build
-	@printf "$(CYAN)▶ Waiting for the API to report healthy...$(NC)\n"
-	@for i in $$(seq 1 60); do \
-		if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then break; fi; \
-		sleep 2; \
-	done
-	@echo ""
+serve: deps-up
+	@printf "$(CYAN)▶ Starting API (release) and frontend dev server natively...$(NC)\n"
 	@printf "$(GREEN)  Dashboard          http://localhost:3000$(NC)\n"
 	@printf "$(GREEN)  GraphQL playground http://localhost:8080/graphql$(NC)\n"
-	@printf "$(GREEN)  Grafana            http://localhost:3001  (admin/admin)$(NC)\n"
+	@printf "$(YELLOW)  Ctrl-C stops both. 'make stop' stops ScyllaDB and Redis.$(NC)\n"
 	@echo ""
-	@printf "$(YELLOW)  First run pulls ScyllaDB and compiles the WASM frontend -- expect several minutes.$(NC)\n"
-	@printf "$(YELLOW)  Schema is applied by the scylla-init service; 'make logs' to watch it.$(NC)\n"
+	@$(MAKE) --no-print-directory -j2 serve-api serve-frontend
 
-.PHONY: touch
-touch:
-	@printf "$(CYAN)▶ Normalising source mtimes...$(NC)\n"
-	@find $(TOUCH_PATHS) -type f -not -path '*/target/*' -not -path '*/dist/*' -exec touch {} +
-	@printf "$(GREEN)✓ mtimes normalised$(NC)\n"
+.PHONY: serve-api
+serve-api:
+	@SCYLLA_HOSTS=$(SCYLLA_HOST):$(SCYLLA_PORT) \
+	 SCYLLA_KEYSPACE=$(SCYLLA_KEYSPACE) \
+	 REDIS_URL=$(REDIS_URL) \
+	 SERVER_ADDR=0.0.0.0:8080 \
+	 RUST_LOG=$${RUST_LOG:-info,drone_graphql_api=debug} \
+	 $(CARGO) run --release --package drone-graphql-api
+
+.PHONY: serve-frontend
+serve-frontend: wasm-check
+	@cd $(FRONTEND_DIR) && $(TRUNK) serve
+
+# ------------------------------------------------------------------------------
+# deps -- ScyllaDB and Redis only. Plain `podman run`, deliberately NOT compose:
+# the app runs natively, so there is no reason to make podman-compose a
+# prerequisite for local development. `make stack-up` is the all-in-containers
+# path if you want it.
+# ------------------------------------------------------------------------------
+.PHONY: deps-up
+deps-up:
+	@printf "$(CYAN)▶ Starting ScyllaDB and Redis...$(NC)\n"
+	@if $(PODMAN) container exists scylla >/dev/null 2>&1; then \
+		$(PODMAN) start scylla >/dev/null; \
+	else \
+		$(PODMAN) run -d --name scylla -p $(SCYLLA_PORT):9042 \
+			docker.io/scylladb/scylla:6.2 \
+			--smp 2 --memory 2G --overprovisioned 1 --developer-mode 1 >/dev/null; \
+	fi
+	@if $(PODMAN) container exists redis >/dev/null 2>&1; then \
+		$(PODMAN) start redis >/dev/null; \
+	else \
+		$(PODMAN) run -d --name redis -p 6379:6379 \
+			docker.io/library/redis:7-alpine \
+			redis-server --appendonly yes --maxmemory 256mb >/dev/null; \
+	fi
+	@printf "$(YELLOW)  Waiting for ScyllaDB to accept CQL (first boot ~60s)...$(NC)\n"
+	@for i in $$(seq 1 60); do \
+		if $(PODMAN) exec scylla cqlsh -e "describe keyspaces" >/dev/null 2>&1; then break; fi; \
+		sleep 3; \
+	done
+	@$(PODMAN) exec scylla cqlsh -e "describe keyspaces" >/dev/null 2>&1 || \
+		{ printf "$(RED)✗ ScyllaDB never came up. 'podman logs scylla' for why.$(NC)\n"; exit 1; }
+	@$(MAKE) --no-print-directory db-init-dev
+	@printf "$(GREEN)✓ ScyllaDB and Redis ready$(NC)\n"
 
 .PHONY: stop
 stop:
-	@$(COMPOSE) -f containers/podman-compose.yml down
+	@printf "$(CYAN)▶ Stopping ScyllaDB and Redis...$(NC)\n"
+	@-$(PODMAN) stop scylla redis >/dev/null 2>&1
+	@printf "$(GREEN)✓ Stopped (data preserved; 'make deps-clean' to wipe)$(NC)\n"
+
+.PHONY: deps-clean
+deps-clean:
+	@-$(PODMAN) rm -f scylla redis >/dev/null 2>&1
+	@printf "$(GREEN)✓ Dependency containers removed$(NC)\n"
 
 .PHONY: logs
 logs:
-	@$(COMPOSE) -f containers/podman-compose.yml logs -f
+	@$(PODMAN) logs -f scylla
 
 .PHONY: help
 help:
 	@printf "\n"
 	@printf "$(CYAN)  DRONE CONVOY TRACKER$(NC)\n"
 	@printf "\n"
-	@printf "  $(BLUE)make serve$(NC)    run the full stack, then open http://localhost:3000\n"
-	@printf "  $(BLUE)make stop$(NC)     tear the stack down\n"
-	@printf "  $(BLUE)make logs$(NC)     follow stack logs\n"
-	@printf "  $(BLUE)make build$(NC)    compile backend + frontend locally\n"
-	@printf "  $(BLUE)make dev$(NC)      hot-reload API + frontend against a local DB\n"
+	@printf "  $(BLUE)make serve$(NC)    run API + dashboard natively -> http://localhost:3000\n"
+	@printf "  $(BLUE)make stop$(NC)     stop ScyllaDB and Redis\n"
+	@printf "  $(BLUE)make logs$(NC)     follow ScyllaDB logs\n"
+	@printf "  $(BLUE)make build$(NC)    compile backend + frontend\n"
+	@printf "  $(BLUE)make dev$(NC)      same as serve, but with hot reload\n"
 	@printf "  $(BLUE)make test$(NC)     workspace tests\n"
 	@printf "  $(BLUE)make lint$(NC)     rustfmt check + clippy\n"
 	@printf "  $(BLUE)make clean$(NC)    remove build artifacts\n"
 	@printf "  $(BLUE)make touch$(NC)    restamp source mtimes (build runs this for you)\n"
 	@printf "\n"
-	@printf "  $(YELLOW)make help-all$(NC) full target list\n"
+	@printf "  $(YELLOW)make stack-up$(NC)  everything in containers instead (needs podman-compose)\n"
+	@printf "  $(YELLOW)make help-all$(NC)  full target list\n"
 	@printf "\n"
 
 .PHONY: help-all
@@ -167,6 +207,12 @@ help-all:
 	@printf "\n$(CYAN)  All targets$(NC)\n\n"
 	@grep -E '^[a-z][a-z0-9_-]*:' $(MAKEFILE_LIST) \
 		| cut -d: -f1 | sort -u | pr -4 -t -w 80
+
+.PHONY: touch
+touch:
+	@printf "$(CYAN)▶ Normalising source mtimes...$(NC)\n"
+	@find $(TOUCH_PATHS) -type f -not -path '*/target/*' -not -path '*/dist/*' -exec touch {} +
+	@printf "$(GREEN)✓ mtimes normalised$(NC)\n"
 
 # ------------------------------------------------------------------------------
 # Setup
@@ -303,7 +349,7 @@ run-simulator-release: build-simulator
 # ------------------------------------------------------------------------------
 
 .PHONY: dev
-dev:
+dev: deps-up
 	@printf "$(CYAN)▶ Starting development environment...$(NC)\n"
 	@printf "$(YELLOW)  Starting API + Frontend in parallel...$(NC)\n"
 	@$(MAKE) -j2 dev-backend dev-frontend

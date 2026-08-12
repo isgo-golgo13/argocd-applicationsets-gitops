@@ -267,6 +267,11 @@ cd crates/drone-frontend
 trunk serve --open
 ```
 
+```shell
+podman machine init --cpus 4 --memory 8192 --disk-size 60
+podman machine start
+podman info | head
+```
 
 
 
