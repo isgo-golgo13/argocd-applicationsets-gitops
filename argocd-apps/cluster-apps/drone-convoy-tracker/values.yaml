@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# drone-convoy-tracker -- COMMON values for every environment.
+#
+# env/<env>/values-<env>.yaml files are thin overlays. Anything identical
+# across environments belongs here and is NOT repeated four times.
+# ---------------------------------------------------------------------------
+
+nameOverride: ""
+
+image:
+  registry: ghcr.io/CHANGEME-ORG
+  api:
+    repository: drone-convoy-tracker-api
+    tag: ""            # defaults to .Chart.AppVersion
+  frontend:
+    repository: drone-convoy-tracker-frontend
+    tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+api:
+  replicas: 2
+  port: 8080
+  # GraphQL introspection and the playground are development affordances.
+  # Overridden off in env/prod.
+  enablePlayground: true
+  enableIntrospection: true
+  logLevel: "info,drone_graphql_api=debug"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+frontend:
+  replicas: 2
+  port: 80
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# Networking -- Cilium Kubernetes Gateway API. No Ingress anywhere.
+#
+# One hostname fronts both the dashboard and the API. That is deliberate: the
+# Leptos client then talks to same-origin /graphql, so there is no CORS surface
+# and no build-time API URL baked into the WASM bundle.
+# ---------------------------------------------------------------------------
+gateway:
+  # Reference an existing shared Gateway (recommended) or let this chart own one.
+  create: false
+  name: cilium-gateway
+  namespace: gateway-system
+  className: cilium
+  listener: https
+
+hostname: drone-convoy-tracker.example.internal
+
+route:
+  # Longest-prefix wins in Gateway API, so /graphql beats / regardless of order.
+  apiPaths:
+    - /graphql
+    - /health
+  uiPath: /
+
+# ---------------------------------------------------------------------------
+# ScyllaDB. This chart owns its own ScyllaCluster by default so that dropping
+# the directory into cluster-apps/ yields a working app with no platform
+# ticket -- the scylla-operator addon (sync wave -1) provides the CRD.
+#
+# Set scylla.create: false to consume a shared cluster instead; then only
+# scylla.hosts is used.
+# ---------------------------------------------------------------------------
+scylla:
+  create: true
+  version: "6.2.0"
+  agentVersion: "3.4.0"
+  datacenter: dc1
+  rack: rack1
+  members: 3
+  cpu: 1
+  memory: 4Gi
+  storageCapacity: 20Gi
+  storageClassName: ""
+  keyspace: drone_ops
+  hosts: ""          # only used when create: false
+
+redis:
+  url: redis://redis:6379
+
+# ---------------------------------------------------------------------------
+# Secrets -- External Secrets Operator syncing from Vault (addon wave -2).
+# ---------------------------------------------------------------------------
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  remotePath: drone-convoy-tracker
+
+# cert-manager Issuer + Certificate for the Gateway listener.
+certificate:
+  enabled: true
+  issuerRef:
+    name: platform-ca
+    kind: ClusterIssuer
+  duration: 2160h
+  renewBefore: 360h
+
+scaling:
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  vpa:
+    # Recommender only -- Goldilocks reads these to size requests. Never Auto
+    # alongside an HPA on the same metric.
+    enabled: true
+    updateMode: "Off"
+  keda:
+    enabled: false
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+metrics:
+  enabled: true
+  port: 9090

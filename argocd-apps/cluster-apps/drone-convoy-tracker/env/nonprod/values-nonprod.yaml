@@ -1,0 +1,14 @@
+# nonprod overlay -- thin by design.
+hostname: drone-convoy-tracker.nonprod.example.internal
+api:
+  replicas: 1
+frontend:
+  replicas: 1
+scylla:
+  members: 1
+  storageCapacity: 5Gi
+scaling:
+  hpa:
+    enabled: false
+podDisruptionBudget:
+  enabled: false

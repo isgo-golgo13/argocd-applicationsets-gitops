@@ -1,0 +1,60 @@
+{{/*
+HPA / VPA / KEDA.
+
+VPA runs in recommender-only mode (updateMode: "Off") so Goldilocks can surface
+right-sizing advice. Never set it to Auto while an HPA drives the same metric --
+the two fight over the same signal and thrash the replica set.
+*/}}
+{{- if .Values.scaling.hpa.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "dct.name" . }}-api
+  minReplicas: {{ .Values.scaling.hpa.minReplicas }}
+  maxReplicas: {{ .Values.scaling.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.scaling.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
+{{- if .Values.scaling.vpa.enabled }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "dct.name" . }}-api
+  updatePolicy:
+    updateMode: {{ .Values.scaling.vpa.updateMode | quote }}
+{{- end }}
+{{- if .Values.scaling.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "dct.name" . }}-api
+  minReplicaCount: {{ .Values.scaling.hpa.minReplicas }}
+  maxReplicaCount: {{ .Values.scaling.hpa.maxReplicas }}
+  triggers: {{- toYaml .Values.scaling.keda.triggers | nindent 4 }}
+{{- end }}

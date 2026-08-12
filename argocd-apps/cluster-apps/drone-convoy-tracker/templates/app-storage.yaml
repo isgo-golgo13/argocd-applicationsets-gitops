@@ -1,0 +1,37 @@
+{{/*
+ScyllaDB. The CRD comes from the scylla-operator addon, which the
+cluster-addons ApplicationSet places in sync wave -1 -- this Application is
+wave 10, so the CRD always exists before this manifest is applied. That
+ordering is the reason the wave mechanism exists.
+
+The operator owns the PersistentVolumeClaims, so this chart declares no PVC of
+its own.
+*/}}
+{{- if .Values.scylla.create }}
+apiVersion: scylla.scylladb.com/v1
+kind: ScyllaCluster
+metadata:
+  name: {{ include "dct.name" . }}
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  version: {{ .Values.scylla.version | quote }}
+  agentVersion: {{ .Values.scylla.agentVersion | quote }}
+  developerMode: false
+  datacenter:
+    name: {{ .Values.scylla.datacenter }}
+    racks:
+      - name: {{ .Values.scylla.rack }}
+        members: {{ .Values.scylla.members }}
+        storage:
+          capacity: {{ .Values.scylla.storageCapacity }}
+          {{- with .Values.scylla.storageClassName }}
+          storageClassName: {{ . }}
+          {{- end }}
+        resources:
+          requests:
+            cpu: {{ .Values.scylla.cpu }}
+            memory: {{ .Values.scylla.memory }}
+          limits:
+            cpu: {{ .Values.scylla.cpu }}
+            memory: {{ .Values.scylla.memory }}
+{{- end }}

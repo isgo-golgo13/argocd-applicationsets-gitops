@@ -1,0 +1,140 @@
+{{/* Deployments for the API and the Leptos dashboard, plus the ServiceAccount. */}}
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "dct.name" . }}
+  labels: {{- include "dct.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: false
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "dct.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels: {{- include "dct.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+      annotations:
+        # Roll the pods whenever non-secret config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/app-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "dct.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ include "dct.apiImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "dct.name" . }}-config
+            {{- if .Values.externalSecrets.enabled }}
+            - secretRef:
+                name: {{ include "dct.name" . }}-secrets
+            {{- end }}
+          # /health is a liveness signal only. Readiness additionally waits on
+          # the GraphQL endpoint, so a pod that cannot reach ScyllaDB is kept
+          # out of the Service rather than serving errors.
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 30
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "dct.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dct.name" . }}-frontend
+  labels: {{- include "dct.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels: {{- include "dct.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels: {{- include "dct.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      serviceAccountName: {{ include "dct.serviceAccountName" . }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: {{ include "dct.frontendImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "dct.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+{{- end }}

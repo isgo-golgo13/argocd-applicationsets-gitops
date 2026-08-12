@@ -1,0 +1,102 @@
+{{/*
+Services + Cilium Kubernetes Gateway API (Gateway + HTTPRoute).
+NO Ingress, no ingress controller, anywhere in this chart.
+
+Both Deployments sit behind ONE hostname. /graphql and /health go to the API,
+everything else to the dashboard. Gateway API matches longest-prefix first, so
+rule order in this file does not affect routing.
+
+GraphQL subscriptions ride this same HTTPRoute: graphql-ws is an HTTP/1.1
+Upgrade on the same path, so it needs no separate listener or route.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dct.name" . }}-api
+  labels: {{- include "dct.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP
+  selector: {{- include "dct.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dct.name" . }}-frontend
+  labels: {{- include "dct.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.frontend.port }}
+      targetPort: http
+      protocol: TCP
+  selector: {{- include "dct.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+{{- if .Values.gateway.create }}
+---
+{{/*
+Owning a Gateway per app is the exception. The shared-Gateway path
+(gateway.create: false) is the default because one Gateway per application
+means one LoadBalancer address per application.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "dct.name" . }}
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    - name: {{ .Values.gateway.listener }}
+      protocol: HTTPS
+      port: 443
+      hostname: {{ .Values.hostname | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ include "dct.name" . }}-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "dct.name" . }}
+  labels: {{- include "dct.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ if .Values.gateway.create }}{{ include "dct.name" . }}{{ else }}{{ .Values.gateway.name }}{{ end }}
+      {{- if not .Values.gateway.create }}
+      namespace: {{ .Values.gateway.namespace }}
+      {{- end }}
+      sectionName: {{ .Values.gateway.listener }}
+  hostnames:
+    - {{ .Values.hostname | quote }}
+  rules:
+    - matches:
+        {{- range .Values.route.apiPaths }}
+        - path:
+            type: PathPrefix
+            value: {{ . | quote }}
+        {{- end }}
+      backendRefs:
+        - name: {{ include "dct.name" . }}-api
+          port: {{ .Values.api.port }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.route.uiPath | quote }}
+      backendRefs:
+        - name: {{ include "dct.name" . }}-frontend
+          port: {{ .Values.frontend.port }}

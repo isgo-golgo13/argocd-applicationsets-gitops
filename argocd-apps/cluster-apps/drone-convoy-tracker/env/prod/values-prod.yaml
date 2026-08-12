@@ -1,0 +1,25 @@
+# prod overlay
+hostname: drone-convoy-tracker.prod.example.internal
+api:
+  replicas: 3
+  # Playground and introspection expose the whole schema. Off in production.
+  enablePlayground: false
+  enableIntrospection: false
+  logLevel: "info"
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits:   { cpu: "2",  memory: 2Gi }
+frontend:
+  replicas: 3
+scylla:
+  members: 3
+  cpu: 2
+  memory: 8Gi
+  storageCapacity: 100Gi
+scaling:
+  hpa:
+    minReplicas: 3
+    maxReplicas: 20
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

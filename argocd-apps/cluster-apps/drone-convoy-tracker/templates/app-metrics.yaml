@@ -1,0 +1,23 @@
+{{/* Metrics scrape surface. Annotation-based so it works with or without the
+Prometheus Operator CRDs -- this chart must not hard-depend on them. */}}
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dct.name" . }}-metrics
+  labels: {{- include "dct.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.metrics.port | quote }}
+    prometheus.io/path: /metrics
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: http
+  selector: {{- include "dct.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}

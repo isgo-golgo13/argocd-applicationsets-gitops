@@ -1,0 +1,13 @@
+apiVersion: v2
+name: drone-convoy-tracker
+description: >-
+  Drone convoy leaderboard, telemetry and engagement tracking. Rust GraphQL API
+  (Axum + async-graphql) over ScyllaDB with a Redis cache-aside layer, plus a
+  Leptos WASM tactical dashboard.
+
+  Unlike the cluster-addons charts, this is a FIRST-PARTY chart: real templates,
+  no upstream dependency to wrap. Source lives at apps/drone-convoy-tracker in
+  this same repository; images are built from its containers/Containerfile.*.
+type: application
+version: 1.0.0
+appVersion: "0.1.0"

@@ -1,0 +1,7 @@
+# uat overlay
+hostname: drone-convoy-tracker.uat.example.internal
+api:
+  replicas: 2
+scylla:
+  members: 3
+  storageCapacity: 10Gi
