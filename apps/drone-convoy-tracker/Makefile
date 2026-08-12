@@ -27,6 +27,14 @@ MAKEFLAGS += --no-builtin-rules
 
 PROJECT_NAME := drone-convoy-tracker
 RUST_VERSION ?= 1.89   # must be >= 1.85 for edition 2024
+
+# Source trees whose mtimes drive rebuild detection. Deliberately excludes
+# containers/ -- Podman keys its COPY cache on content, so touching those files
+# only invalidates layer cache for no gain.
+TOUCH_PATHS := Cargo.toml Cargo.lock $(wildcard crates) $(wildcard config) $(wildcard schema) $(wildcard assets)
+
+# Set TOUCH=0 to skip the mtime sweep in `make build` (see the touch target).
+TOUCH ?= 1
 VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -79,6 +87,19 @@ NC := \033[0m
 #   make test     workspace tests
 #   make lint     rustfmt check + clippy
 #   make clean    remove build artifacts
+#   make touch    restamp source mtimes -- `build` runs this automatically
+#
+# Why touch: overlaying a zip or checkout preserves the ARCHIVE's mtimes, so a
+# file you just changed can land with a timestamp OLDER than the artifact built
+# from its previous version. Cargo and Trunk decide staleness from mtimes, so
+# the change compiles away to nothing and you stare at stale output. Restamping
+# before every build makes that class of bug impossible.
+#
+# The cost is real: every source becomes newer than every artifact, so `build`
+# is always a full rebuild, never incremental. That is the right trade for a
+# build you run after dropping in changes, and the wrong one for a tight edit
+# loop -- which is why `make dev` does NOT touch. Use TOUCH=0 make build to opt
+# out for a single run.
 #
 # Everything below the front door is machinery those targets call. Run
 # `make help-all` to see it.
@@ -101,6 +122,12 @@ serve:
 	@printf "$(YELLOW)  First run pulls ScyllaDB and compiles the WASM frontend -- expect several minutes.$(NC)\n"
 	@printf "$(YELLOW)  Schema is applied by the scylla-init service; 'make logs' to watch it.$(NC)\n"
 
+.PHONY: touch
+touch:
+	@printf "$(CYAN)▶ Normalising source mtimes...$(NC)\n"
+	@find $(TOUCH_PATHS) -type f -not -path '*/target/*' -not -path '*/dist/*' -exec touch {} +
+	@printf "$(GREEN)✓ mtimes normalised$(NC)\n"
+
 .PHONY: stop
 stop:
 	@$(COMPOSE) -f containers/podman-compose.yml down
@@ -122,6 +149,7 @@ help:
 	@printf "  $(BLUE)make test$(NC)     workspace tests\n"
 	@printf "  $(BLUE)make lint$(NC)     rustfmt check + clippy\n"
 	@printf "  $(BLUE)make clean$(NC)    remove build artifacts\n"
+	@printf "  $(BLUE)make touch$(NC)    restamp source mtimes (build runs this for you)\n"
 	@printf "\n"
 	@printf "  $(YELLOW)make help-all$(NC) full target list\n"
 	@printf "\n"
@@ -188,7 +216,11 @@ all: build-backend build-frontend
 	@printf "$(GREEN)✓ Full build complete!$(NC)\n"
 
 .PHONY: build
-build: all
+build:
+ifeq ($(TOUCH),1)
+	@$(MAKE) --no-print-directory touch
+endif
+	@$(MAKE) --no-print-directory all
 
 .PHONY: build-backend
 build-backend:
