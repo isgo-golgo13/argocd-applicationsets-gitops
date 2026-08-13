@@ -1,6 +1,24 @@
 ##  DoD Attack Drone Convoy Tracking System (Rust)
 
-The provided Rust application is a full-stack DoD attack drone convoy tracking system using a WebAssembly native Rust Letpos frontend reading realtime WebSocket drone status telemetry, GraphQL drone leader tracking on the server-side using Redis RW cache cluster and ScyllaDB NoSQL DB (ScyllaDB is 100% rewrite of Cassandra DB NoSQL in C++)
+The provided Rust application is a full-stack DoD attack drone convoy tracking system using a WebAssembly native Rust Letpos frontend reading realtime WebSocket drone status telemetry, GraphQL drone leader tracking on the server-side using Redis RW cache cluster and ScyllaDB NoSQL DB (ScyllaDB is 100% rewrite of Cassandra DB NoSQL in C++).
+
+
+See the following screenshots of systems frontend.
+
+Screenshot 1
+![drone-svc-ui-1](docs/drone-convoy-1.png)
+
+Screenshot 2
+![drone-svc-ui-2](docs/drone-convoy-2.png)
+
+Screenshot 3
+![drone-svc-ui-3](docs/drone-convoy-3.png)
+
+Screenshot 4 
+![drone-svc-ui-4](docs/drone-convoy-4.png)
+
+Screenshot 5 
+![drone-svc-ui-5](docs/drone-convoy-5.png)
 
 
 ## Project Structure
