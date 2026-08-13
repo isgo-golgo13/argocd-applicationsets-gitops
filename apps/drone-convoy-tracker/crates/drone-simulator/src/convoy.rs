@@ -23,7 +23,12 @@ pub struct SimulatedDrone {
 impl SimulatedDrone {
     /// Create a new simulated drone.
     pub fn new(callsign: &str, platform_type: &str) -> Self {
-        let drone_id = Uuid::new_v4();
+        // Deterministic id: UUIDv5 of the callsign. A simulator restart
+        // re-derives the SAME id per callsign, so its upserts OVERWRITE the
+        // previous run's rows (drones, waypoints, telemetry buckets) instead
+        // of accumulating ghost drones with fresh random ids — which is
+        // exactly what a random v4 here did across restarts.
+        let drone_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, callsign.as_bytes());
         let mut flight_gen = FlightPathGenerator::kandahar();
         let waypoints = flight_gen.generate_mission_path(callsign);
         let telemetry_gen = TelemetryGenerator::new(drone_id, callsign, waypoints.clone());
