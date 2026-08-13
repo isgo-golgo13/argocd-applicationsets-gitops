@@ -301,3 +301,114 @@ pub enum SortOrder {
     #[default]
     Desc,
 }
+
+// =============================================================================
+// SCHEMA → DOMAIN CONVERSIONS
+// =============================================================================
+//
+// The mutations accept schema enums and persist domain enums; these reverse
+// impls are the bridge. Kept exhaustive (no `_` arm) so a new variant on
+// either side is a compile error here, not silent drift — enum drift between
+// this schema and its callers has already burned this repo once.
+
+impl From<DroneStatus> for domain::DroneStatus {
+    fn from(s: DroneStatus) -> Self {
+        match s {
+            DroneStatus::Preflight => Self::Preflight,
+            DroneStatus::Airborne => Self::Airborne,
+            DroneStatus::Loiter => Self::Loiter,
+            DroneStatus::Ingress => Self::Ingress,
+            DroneStatus::Egress => Self::Egress,
+            DroneStatus::Rtb => Self::Rtb,
+            DroneStatus::Landed => Self::Landed,
+            DroneStatus::Maintenance => Self::Maintenance,
+        }
+    }
+}
+
+impl From<ConvoyStatus> for domain::ConvoyStatus {
+    fn from(s: ConvoyStatus) -> Self {
+        match s {
+            ConvoyStatus::Planning => Self::Planning,
+            ConvoyStatus::Active => Self::Active,
+            ConvoyStatus::Rtb => Self::Rtb,
+            ConvoyStatus::Complete => Self::Complete,
+            ConvoyStatus::Abort => Self::Abort,
+        }
+    }
+}
+
+impl From<MissionType> for domain::MissionType {
+    fn from(m: MissionType) -> Self {
+        match m {
+            MissionType::Isr => Self::Isr,
+            MissionType::Strike => Self::Strike,
+            MissionType::Escort => Self::Escort,
+            MissionType::Resupply => Self::Resupply,
+            MissionType::Sar => Self::Sar,
+        }
+    }
+}
+
+impl From<domain::MissionType> for MissionType {
+    fn from(m: domain::MissionType) -> Self {
+        match m {
+            domain::MissionType::Isr => Self::Isr,
+            domain::MissionType::Strike => Self::Strike,
+            domain::MissionType::Escort => Self::Escort,
+            domain::MissionType::Resupply => Self::Resupply,
+            domain::MissionType::Sar => Self::Sar,
+        }
+    }
+}
+
+impl From<WaypointType> for domain::WaypointType {
+    fn from(w: WaypointType) -> Self {
+        match w {
+            WaypointType::Nav => Self::Nav,
+            WaypointType::Loiter => Self::Loiter,
+            WaypointType::Strike => Self::Strike,
+            WaypointType::Refuel => Self::Refuel,
+            WaypointType::Rendezvous => Self::Rendezvous,
+            WaypointType::Checkpoint => Self::Checkpoint,
+        }
+    }
+}
+
+impl From<WeaponType> for domain::WeaponType {
+    fn from(w: WeaponType) -> Self {
+        match w {
+            WeaponType::Agm114Hellfire => Self::Agm114Hellfire,
+            WeaponType::Gbu12Paveway => Self::Gbu12Paveway,
+            WeaponType::Aim9xSidewinder => Self::Aim9xSidewinder,
+            WeaponType::Gbu38Jdam => Self::Gbu38Jdam,
+            WeaponType::Agm176Griffin => Self::Agm176Griffin,
+        }
+    }
+}
+
+impl From<TargetType> for domain::TargetType {
+    fn from(t: TargetType) -> Self {
+        match t {
+            TargetType::Vehicle => Self::Vehicle,
+            TargetType::Structure => Self::Structure,
+            TargetType::Personnel => Self::Personnel,
+            TargetType::Radar => Self::Radar,
+            TargetType::AirDefense => Self::AirDefense,
+            TargetType::Supply => Self::Supply,
+        }
+    }
+}
+
+impl From<domain::TargetType> for TargetType {
+    fn from(t: domain::TargetType) -> Self {
+        match t {
+            domain::TargetType::Vehicle => Self::Vehicle,
+            domain::TargetType::Structure => Self::Structure,
+            domain::TargetType::Personnel => Self::Personnel,
+            domain::TargetType::Radar => Self::Radar,
+            domain::TargetType::AirDefense => Self::AirDefense,
+            domain::TargetType::Supply => Self::Supply,
+        }
+    }
+}

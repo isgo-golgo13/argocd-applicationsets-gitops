@@ -654,3 +654,84 @@ pub struct Connection<T: async_graphql::OutputType> {
     /// Has previous pages
     pub has_previous_page: bool,
 }
+
+// =============================================================================
+// DOMAIN → SCHEMA CONVERSIONS
+// =============================================================================
+//
+// One conversion per read path, mirroring the LeaderboardEntry pattern above.
+// Resolvers stay thin: repo → domain type → `.into()` → wire type.
+
+impl From<domain::Convoy> for Convoy {
+    fn from(c: domain::Convoy) -> Self {
+        Self {
+            convoy_id: ID(c.convoy_id.to_string()),
+            callsign: c.convoy_callsign,
+            mission_type: c.mission_type.into(),
+            status: c.status.into(),
+            aor_name: c.aor_name,
+            aor_center: c.aor_center.into(),
+            aor_radius_km: c.aor_radius_km,
+            drone_count: i32::from(c.drone_count),
+            commanding_unit: c.commanding_unit,
+            mission_start: c.mission_start,
+            mission_end: c.mission_end,
+            created_at: c.created_at,
+        }
+    }
+}
+
+impl From<domain::Waypoint> for Waypoint {
+    fn from(w: domain::Waypoint) -> Self {
+        Self {
+            waypoint_id: ID(w.waypoint_id.to_string()),
+            drone_id: ID(w.drone_id.to_string()),
+            sequence_number: i32::from(w.sequence_number),
+            name: w.waypoint_name,
+            waypoint_type: w.waypoint_type.into(),
+            coordinates: w.coordinates.into(),
+            status: w.status.into(),
+            planned_arrival: w.planned_arrival,
+            actual_arrival: w.actual_arrival,
+            planned_departure: w.planned_departure,
+            actual_departure: w.actual_departure,
+            loiter_duration_min: w.loiter_duration_min,
+        }
+    }
+}
+
+impl From<domain::Engagement> for Engagement {
+    fn from(e: domain::Engagement) -> Self {
+        Self {
+            engagement_id: ID(e.engagement_id.to_string()),
+            convoy_id: ID(e.convoy_id.to_string()),
+            drone_id: ID(e.drone_id.to_string()),
+            drone_callsign: e.drone_callsign,
+            engaged_at: e.engaged_at,
+            weapon_type: e.weapon_type.into(),
+            target_type: e.target.target_type.into(),
+            target_coordinates: e.target.coordinates.into(),
+            shooter_position: e.shooter_position.into(),
+            range_km: e.range_to_target_km,
+            hit: e.hit,
+            damage_assessment: e.result.damage_assessment.into(),
+            authorization_code: e.authorization_code,
+            roe_compliant: e.roe_compliance,
+        }
+    }
+}
+
+impl From<domain::Telemetry> for TelemetrySnapshot {
+    fn from(t: domain::Telemetry) -> Self {
+        Self {
+            drone_id: ID(t.drone_id.to_string()),
+            recorded_at: t.recorded_at,
+            position: t.position.into(),
+            fuel_remaining_pct: t.fuel_remaining_pct,
+            current_waypoint: i32::from(t.current_waypoint),
+            velocity_mps: t.velocity_mps,
+            mesh_connectivity: t.mesh_connectivity,
+            distance_to_next_km: t.distance_to_next_km,
+        }
+    }
+}

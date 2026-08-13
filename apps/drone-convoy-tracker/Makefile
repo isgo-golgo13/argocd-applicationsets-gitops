@@ -391,6 +391,7 @@ db-init-dev:
 		{ printf "$(RED)✗ Failed to create keyspace$(NC)\n"; exit 1; }
 	@$(PODMAN) exec -i scylla cqlsh < $(SCHEMA_DIR)/cql/001_core_schema.cql || \
 		{ printf "$(RED)✗ Failed to create tables$(NC)\n"; exit 1; }
+	@$(PODMAN) exec -i scylla cqlsh < $(SCHEMA_DIR)/cql/002_waypoint_columns.cql 2>/dev/null || true
 	@printf "$(GREEN)✓ Dev schema initialized$(NC)\n"
 
 .PHONY: db-init-prod
@@ -401,6 +402,7 @@ db-init-prod:
 		{ printf "$(RED)✗ Failed to create keyspace$(NC)\n"; exit 1; }
 	@cqlsh $(SCYLLA_HOST) $(SCYLLA_PORT) -f $(SCHEMA_DIR)/cql/001_core_schema.cql || \
 		{ printf "$(RED)✗ Failed to create tables$(NC)\n"; exit 1; }
+	@cqlsh $(SCYLLA_HOST) $(SCYLLA_PORT) -f $(SCHEMA_DIR)/cql/002_waypoint_columns.cql 2>/dev/null || true
 	@printf "$(GREEN)✓ Production schema initialized$(NC)\n"
 
 .PHONY: db-reset

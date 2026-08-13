@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS drones (
     successful_hits     int,
     accuracy_pct        float,           -- Computed: successful_hits / total_engagements * 100
     
+    -- Route progress (denormalized from waypoints for the dashboard cards)
+    current_waypoint    smallint,
+    total_waypoints     smallint,
+    
     -- Metadata
     created_at          timestamp,
     updated_at          timestamp,

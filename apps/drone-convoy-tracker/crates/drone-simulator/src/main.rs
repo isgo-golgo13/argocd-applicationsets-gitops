@@ -1,12 +1,24 @@
 //! Drone Convoy Simulator CLI
 //!
-//! Simulates drone telemetry and engagements, posting to GraphQL API.
+//! Simulates drone convoy operations and posts EVERYTHING to the GraphQL API:
+//! convoy registration, waypoint routes, per-tick drone state, telemetry, and
+//! engagements. If a dashboard panel exists, this binary feeds it.
+//!
+//! Startup sequence (bootstrap):
+//!   1. `createConvoy`     — with the well-known demo convoy id
+//!   2. `createWaypoints`  — the full planned route, per drone
+//!   3. `updateDroneState` — registers each drone (callsign, platform, route)
+//!
+//! Per tick:
+//!   `recordTelemetry` + `updateDroneState` per drone, `recordEngagement` as
+//!   they occur, and `updateConvoyStatus` on status transitions.
 
 use anyhow::Result;
 use clap::Parser;
+use drone_simulator::convoy::ConvoyStatus;
 use drone_simulator::ConvoySimulator;
 use reqwest::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -67,12 +79,29 @@ async fn main() -> Result<()> {
     info!("API: {}", args.api_url);
     info!("Tick: {}ms, Duration: {} ticks", args.tick_ms, args.duration);
 
+    // -------------------------------------------------------------------------
+    // BOOTSTRAP — register convoy, routes and drones before the first tick,
+    // so the dashboard has real rows to render from second one.
+    // -------------------------------------------------------------------------
+    if !args.dry_run {
+        bootstrap(&client, &args, &convoy).await;
+    }
+
+    let mut last_status = convoy.status;
+
     for tick in 0..args.duration {
         // Advance mission
         convoy.advance(progress_per_tick);
         let state = convoy.state();
 
-        // Generate telemetry
+        // Convoy status transitions (Active -> Rtb -> Complete)
+        if !args.dry_run && state.status != last_status {
+            post_convoy_status(&client, &args.api_url, &convoy, state.status).await;
+            last_status = state.status;
+        }
+
+        // Telemetry for every drone — recorded AND mirrored onto drone state,
+        // so the cards, the map and the chart all move together.
         let telemetry = convoy.generate_telemetry();
         info!(
             "Tick {}/{} | Progress: {:.1}% | Status: {:?} | Telemetry: {} snapshots",
@@ -83,22 +112,24 @@ async fn main() -> Result<()> {
             telemetry.len()
         );
 
+        if !args.dry_run {
+            for snap in &telemetry {
+                post_telemetry(&client, &args.api_url, snap).await;
+                post_drone_state(&client, &args.api_url, &convoy, snap, state.progress_pct).await;
+            }
+        }
+
         // Simulate engagements
         let engagements = convoy.simulate_engagements();
-        if !engagements.is_empty() {
-            for e in &engagements {
-                let result = if e.hit { "HIT" } else { "MISS" };
-                info!(
-                    "  {} {} | {} | {} @ {:.1}km",
-                    e.callsign, result, e.weapon_type.as_str(), e.target_type.as_str(), e.range_km
-                );
+        for e in &engagements {
+            let result = if e.hit { "HIT" } else { "MISS" };
+            info!(
+                "  {} {} | {} | {} @ {:.1}km",
+                e.callsign, result, e.weapon_type.as_str(), e.target_type.as_str(), e.range_km
+            );
 
-                // Post engagement to API
-                if !args.dry_run {
-                    if let Err(err) = post_engagement(&client, &args.api_url, e).await {
-                        warn!("Failed to post engagement: {}", err);
-                    }
-                }
+            if !args.dry_run {
+                post_engagement(&client, &args.api_url, e).await;
             }
         }
 
@@ -120,6 +151,10 @@ async fn main() -> Result<()> {
 
     info!("Mission complete!");
 
+    if !args.dry_run {
+        post_convoy_status(&client, &args.api_url, &convoy, ConvoyStatus::Complete).await;
+    }
+
     // Final leaderboard
     let leaderboard = convoy.leaderboard();
     info!("=== FINAL LEADERBOARD ===");
@@ -138,12 +173,206 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+// =============================================================================
+// BOOTSTRAP
+// =============================================================================
+
+/// Register convoy, waypoint routes and drone identities with the API.
+///
+/// Failures are logged and skipped — the simulator keeps flying so a partial
+/// registration still produces a partially-live dashboard rather than nothing.
+async fn bootstrap(client: &Client, args: &Args, convoy: &ConvoySimulator) {
+    // 1. Convoy, pinned to the well-known id so the dashboard's queries, the
+    //    simulator's writes and the leaderboard reads all agree.
+    let query = r#"
+        mutation CreateConvoy($input: CreateConvoyInput!) {
+            createConvoy(input: $input) { convoyId }
+        }
+    "#;
+    let variables = json!({
+        "input": {
+            "convoyId": convoy.convoy_id.to_string(),
+            "callsign": format!("{}-CONVOY", args.callsign),
+            "missionType": args.mission.to_uppercase(),
+            "aorName": "Kandahar Province",
+            "aorCenter": { "latitude": 31.6289, "longitude": 65.7372, "altitudeM": 1000.0 },
+            "aorRadiusKm": 150.0,
+            "commandingUnit": "432nd Wing",
+            "roeProfile": "STANDARD"
+        }
+    });
+    post_graphql(client, &args.api_url, "createConvoy", query, variables).await;
+
+    // 2. Waypoint routes + 3. drone registration
+    for (idx, drone) in convoy.drones.values().enumerate() {
+        let waypoints: Vec<Value> = drone
+            .waypoints
+            .iter()
+            .map(|w| {
+                json!({
+                    "sequenceNumber": w.sequence as i32,
+                    "name": w.name,
+                    "waypointType": waypoint_type_wire(w.waypoint_type),
+                    "coordinates": {
+                        "latitude": w.coordinates.latitude,
+                        "longitude": w.coordinates.longitude,
+                        "altitudeM": w.coordinates.altitude_m,
+                        "headingDeg": f64::from(w.coordinates.heading_deg),
+                        "speedMps": f64::from(w.coordinates.speed_mps)
+                    }
+                })
+            })
+            .collect();
+
+        let query = r#"
+            mutation CreateWaypoints($input: CreateWaypointsInput!) {
+                createWaypoints(input: $input) { sequenceNumber }
+            }
+        "#;
+        let variables = json!({
+            "input": { "droneId": drone.drone_id.to_string(), "waypoints": waypoints }
+        });
+        post_graphql(client, &args.api_url, "createWaypoints", query, variables).await;
+
+        let first = drone.waypoints.first();
+        let query = r#"
+            mutation RegisterDrone($input: UpdateDroneStateInput!) {
+                updateDroneState(input: $input) { droneId }
+            }
+        "#;
+        let variables = json!({
+            "input": {
+                "convoyId": convoy.convoy_id.to_string(),
+                "droneId": drone.drone_id.to_string(),
+                "callsign": drone.callsign,
+                "tailNumber": format!("AF-{:03}", idx + 1),
+                "platformType": drone.platform_type,
+                "status": "AIRBORNE",
+                "fuelPct": 100.0,
+                "currentWaypoint": 0,
+                "totalWaypoints": drone.waypoints.len() as i32,
+                "position": first.map(|w| json!({
+                    "latitude": w.coordinates.latitude,
+                    "longitude": w.coordinates.longitude,
+                    "altitudeM": w.coordinates.altitude_m
+                }))
+            }
+        });
+        post_graphql(client, &args.api_url, "updateDroneState", query, variables).await;
+    }
+
+    info!(
+        "Bootstrap complete: convoy + {} drone routes registered",
+        convoy.drones.len()
+    );
+}
+
+// =============================================================================
+// PER-TICK POSTS
+// =============================================================================
+
+/// Post one telemetry snapshot.
+async fn post_telemetry(
+    client: &Client,
+    api_url: &str,
+    snap: &drone_simulator::telemetry::TelemetrySnapshot,
+) {
+    let query = r#"
+        mutation RecordTelemetry($input: CreateTelemetryInput!) {
+            recordTelemetry(input: $input) { droneId }
+        }
+    "#;
+    let mesh = (f64::from(snap.signal_strength_dbm) + 100.0) / 50.0;
+    let variables = json!({
+        "input": {
+            "droneId": snap.drone_id.to_string(),
+            "position": {
+                "latitude": snap.position.latitude,
+                "longitude": snap.position.longitude,
+                "altitudeM": snap.position.altitude_m,
+                "headingDeg": f64::from(snap.position.heading_deg),
+                "speedMps": f64::from(snap.position.speed_mps)
+            },
+            "fuelPct": f64::from(snap.fuel_remaining_pct),
+            "currentWaypoint": snap.current_waypoint as i32,
+            "velocityMps": f64::from(snap.ground_speed_mps),
+            "meshConnectivity": mesh.clamp(0.0, 1.0)
+        }
+    });
+    post_graphql(client, api_url, "recordTelemetry", query, variables).await;
+}
+
+/// Mirror the snapshot onto the drone row, with a status derived from
+/// mission progress: AIRBORNE → INGRESS → EGRESS → RTB.
+async fn post_drone_state(
+    client: &Client,
+    api_url: &str,
+    convoy: &ConvoySimulator,
+    snap: &drone_simulator::telemetry::TelemetrySnapshot,
+    progress_pct: f32,
+) {
+    let status = match progress_pct {
+        p if p < 10.0 => "AIRBORNE",
+        p if p < 50.0 => "INGRESS",
+        p if p < 90.0 => "EGRESS",
+        _ => "RTB",
+    };
+
+    let query = r#"
+        mutation UpdateDroneState($input: UpdateDroneStateInput!) {
+            updateDroneState(input: $input) { droneId }
+        }
+    "#;
+    let variables = json!({
+        "input": {
+            "convoyId": convoy.convoy_id.to_string(),
+            "droneId": snap.drone_id.to_string(),
+            "status": status,
+            "fuelPct": f64::from(snap.fuel_remaining_pct),
+            "currentWaypoint": snap.current_waypoint as i32,
+            "position": {
+                "latitude": snap.position.latitude,
+                "longitude": snap.position.longitude,
+                "altitudeM": snap.position.altitude_m,
+                "headingDeg": f64::from(snap.position.heading_deg),
+                "speedMps": f64::from(snap.position.speed_mps)
+            }
+        }
+    });
+    post_graphql(client, api_url, "updateDroneState", query, variables).await;
+}
+
+/// Post a convoy status transition.
+async fn post_convoy_status(
+    client: &Client,
+    api_url: &str,
+    convoy: &ConvoySimulator,
+    status: ConvoyStatus,
+) {
+    let wire = match status {
+        ConvoyStatus::Planning => "PLANNING",
+        ConvoyStatus::Active => "ACTIVE",
+        ConvoyStatus::Rtb => "RTB",
+        ConvoyStatus::Complete => "COMPLETE",
+        ConvoyStatus::Abort => "ABORT",
+    };
+    let query = r#"
+        mutation UpdateConvoyStatus($input: UpdateConvoyStatusInput!) {
+            updateConvoyStatus(input: $input) { convoyId status }
+        }
+    "#;
+    let variables = json!({
+        "input": { "convoyId": convoy.convoy_id.to_string(), "status": wire }
+    });
+    post_graphql(client, api_url, "updateConvoyStatus", query, variables).await;
+}
+
 /// Post engagement to GraphQL API.
 async fn post_engagement(
     client: &Client,
     api_url: &str,
     engagement: &drone_simulator::engagement::SimulatedEngagement,
-) -> Result<()> {
+) {
     let query = r#"
         mutation RecordEngagement($input: RecordEngagementInput!) {
             recordEngagement(input: $input) {
@@ -162,28 +391,61 @@ async fn post_engagement(
             "hit": engagement.hit,
             "weaponType": engagement.weapon_type.as_str(),
             "targetType": engagement.target_type.as_str(),
-            "rangeKm": engagement.range_km
+            "rangeKm": engagement.range_km,
+            "callsign": engagement.callsign
         }
     });
 
-    let response = client
-        .post(api_url)
-        .json(&json!({
-            "query": query,
-            "variables": variables
-        }))
-        .send()
-        .await?;
+    post_graphql(client, api_url, "recordEngagement", query, variables).await;
+}
 
-    // GraphQL reports errors in a 200 OK body. Checking only the HTTP status
-    // means every rejected mutation looks like a success and the leaderboard
-    // stays silently empty -- which is exactly what happened.
+// =============================================================================
+// TRANSPORT
+// =============================================================================
+
+/// Map the simulator's waypoint taxonomy onto the schema's.
+fn waypoint_type_wire(t: drone_simulator::flight::WaypointType) -> &'static str {
+    use drone_simulator::flight::WaypointType as W;
+    match t {
+        W::Takeoff | W::Navigation | W::Rtb => "NAV",
+        W::Loiter => "LOITER",
+        W::Target => "STRIKE",
+        W::Landing => "CHECKPOINT",
+    }
+}
+
+/// POST one GraphQL operation and surface every way it can fail.
+///
+/// GraphQL reports errors in a 200 OK body. Checking only the HTTP status
+/// means every rejected mutation looks like a success and the dashboard
+/// stays silently empty — which is exactly what happened. Any new caller
+/// goes through this function.
+async fn post_graphql(client: &Client, api_url: &str, op: &str, query: &str, variables: Value) {
+    let response = match client
+        .post(api_url)
+        .json(&json!({ "query": query, "variables": variables }))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(err) => {
+            warn!("{op}: request failed: {err}");
+            return;
+        }
+    };
+
     let status = response.status();
-    let body: serde_json::Value = response.json().await?;
+    let body: Value = match response.json().await {
+        Ok(b) => b,
+        Err(err) => {
+            warn!("{op}: unreadable response: {err}");
+            return;
+        }
+    };
 
     if !status.is_success() {
-        warn!("API returned status {status}: {body}");
-        return Ok(());
+        warn!("{op}: API returned status {status}: {body}");
+        return;
     }
 
     if let Some(errors) = body.get("errors").and_then(|e| e.as_array()) {
@@ -192,10 +454,7 @@ async fn post_engagement(
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("unknown GraphQL error");
-            warn!("recordEngagement rejected: {message}");
+            warn!("{op} rejected: {message}");
         }
-        return Ok(());
     }
-
-    Ok(())
 }

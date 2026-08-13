@@ -54,10 +54,10 @@ pub mod strategy;
 pub use cache::{CacheClient, CacheConfig, SharedCacheClient};
 pub use error::{PersistenceError, Result};
 pub use repository::{
-    ScyllaClient, ScyllaConfig,
+    DroneRecord, ScyllaClient, ScyllaConfig,
     ScyllaLeaderboardRepository, ScyllaEngagementRepository,
     ScyllaTelemetryRepository, ScyllaConvoyRepository,
-    ScyllaWaypointRepository,
+    ScyllaDroneRepository, ScyllaWaypointRepository,
 };
 pub use strategy::{ReadStrategy, WriteStrategy};
 

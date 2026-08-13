@@ -5,8 +5,8 @@
 pub mod scylla_impl;
 
 pub use scylla_impl::{
-    ScyllaClient, ScyllaConfig,
+    DroneRecord, ScyllaClient, ScyllaConfig,
     ScyllaLeaderboardRepository, ScyllaEngagementRepository,
     ScyllaTelemetryRepository, ScyllaConvoyRepository,
-    ScyllaWaypointRepository,
+    ScyllaDroneRepository, ScyllaWaypointRepository,
 };

@@ -48,7 +48,7 @@ pub mod resolvers;
 pub mod schema;
 
 use async_graphql::Schema;
-use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
+use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{
     extract::State,
     http::Method,
@@ -118,8 +118,13 @@ pub fn build_router(schema: ApiSchema) -> Router {
     Router::new()
         // GraphQL endpoints
         .route("/graphql", get(graphql_playground).post(graphql_handler))
-        // TODO: WebSocket subscriptions disabled until async-graphql-axum supports axum 0.8
-        // .route("/graphql/ws", any(GraphQLSubscription::new(schema)))
+        // WebSocket subscriptions. GraphQLSubscription is a tower Service,
+        // not an axum handler, so it mounts via `route_service` — this is the
+        // async-graphql-axum 7 + axum 0.8 pairing. If this line ever fails to
+        // compile after a dependency bump, comment it out: everything else in
+        // this router is independent of it and the dashboard falls back to
+        // polling.
+        .route_service("/graphql/ws", GraphQLSubscription::new(schema))
         // Health check
         .route("/health", get(health_check))
         .route("/", get(|| async { "Drone Convoy Tracker API" }))

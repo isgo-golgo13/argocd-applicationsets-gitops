@@ -48,6 +48,9 @@ pub struct RecordEngagementInput {
     pub target_type: Option<TargetType>,
     /// Optional range to target in kilometers
     pub range_km: Option<f64>,
+    /// Optional shooter callsign, used for the leaderboard entry when the
+    /// drone has not yet been registered via `updateDroneState`
+    pub callsign: Option<String>,
 }
 
 /// Input for creating a full engagement record
@@ -119,6 +122,14 @@ pub struct UpdateDroneStateInput {
     pub fuel_pct: Option<f64>,
     /// Current waypoint number
     pub current_waypoint: Option<i32>,
+    /// Radio callsign (set on first update to register the drone)
+    pub callsign: Option<String>,
+    /// Military tail number
+    pub tail_number: Option<String>,
+    /// Platform type
+    pub platform_type: Option<PlatformType>,
+    /// Total waypoints on the planned route
+    pub total_waypoints: Option<i32>,
 }
 
 /// Input for creating telemetry record
@@ -147,6 +158,10 @@ pub struct CreateTelemetryInput {
 /// Input for creating a new convoy
 #[derive(Debug, Clone, InputObject)]
 pub struct CreateConvoyInput {
+    /// Optional explicit convoy ID. When omitted a random UUID is generated.
+    /// The simulator passes its well-known demo ID here so the dashboard,
+    /// its writes and the leaderboard reads all agree on one convoy.
+    pub convoy_id: Option<String>,
     /// Convoy callsign
     pub callsign: String,
     /// Mission type
