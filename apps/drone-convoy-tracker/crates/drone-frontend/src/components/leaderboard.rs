@@ -6,10 +6,16 @@ use leptos::prelude::*;
 
 use crate::state::{use_app_state, LeaderboardEntry};
 
-/// Streak marker: a target roundel with crosshair ticks, stroke-only in
-/// currentColor so it themes with the row. Replaces the fire emoji, which
-/// rendered as an unthemeable full-color glyph.
-const TARGET_SVG: &str = r##"<svg viewBox="0 0 12 12" width="12" height="12" xmlns="http://www.w3.org/2000/svg" aria-label="hit streak"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/><line x1="6" y1="0.2" x2="6" y2="2.4" stroke="currentColor" stroke-width="1.1"/><line x1="6" y1="9.6" x2="6" y2="11.8" stroke="currentColor" stroke-width="1.1"/><line x1="0.2" y1="6" x2="2.4" y2="6" stroke="currentColor" stroke-width="1.1"/><line x1="9.6" y1="6" x2="11.8" y2="6" stroke="currentColor" stroke-width="1.1"/></svg>"##;
+/// Streak marker: target roundel with crosshair ticks, stroke-only in
+/// currentColor so it themes with the row (accent-green via the wrapping
+/// span). Lives in assets/images/ beside drone.svg — one directory holds
+/// every piece of artwork, compiled in at build time.
+const TARGET_SVG: &str = include_str!("../../../../assets/images/target-streak.svg");
+
+/// Strip the XML prolog: valid in a standalone file, invalid inside innerHTML.
+fn inline_svg(svg: &str) -> &str {
+    svg.find("<svg").map_or(svg, |i| &svg[i..])
+}
 
 /// Leaderboard panel component
 #[component]
@@ -117,7 +123,7 @@ fn LeaderboardRow(entry: LeaderboardEntry) -> impl IntoView {
                     " • "
                     <span
                         style="display:inline-block; vertical-align:-1px; color: var(--accent-primary);"
-                        inner_html=TARGET_SVG
+                        inner_html=inline_svg(TARGET_SVG)
                     ></span>
                     {entry.current_streak}
                 </div>

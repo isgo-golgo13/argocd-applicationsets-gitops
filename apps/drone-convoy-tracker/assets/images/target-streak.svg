@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  target-streak.svg : target roundel with crosshair ticks, used as the
+  hit-streak marker on accuracy leaderboard rows (replaces the fire emoji,
+  which rendered as an unthemeable full-colour glyph).
+
+  THEMING. Every stroke and fill is currentColor, so the icon takes the
+  colour of whatever element it is inlined into; the leaderboard wraps it in
+  a span coloured by the accent-primary custom property (two-dash prefixed).
+  Opened standalone, with no inherited colour, currentColor resolves to
+  black; that is expected for this file.
+
+  NOTE for editors: XML comments must not contain a double hyphen sequence,
+  so custom property names in this comment are written without their
+  two-dash prefix. A literal one renders the whole file unparseable in
+  strict tools, which presents as a blank or broken icon.
+
+  USAGE. Inlined at build time via include_str! in
+  crates/drone-frontend/src/components/leaderboard.rs, with the XML prolog
+  stripped before innerHTML injection (a prolog is valid in a standalone
+  file, invalid inside innerHTML).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="12" height="12"
+     role="img" aria-label="hit streak">
+  <!-- outer ring -->
+  <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <!-- inner ring -->
+  <circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.85"/>
+  <!-- bullseye -->
+  <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+  <!-- crosshair ticks, extending just past the outer ring -->
+  <line x1="8"    y1="0.4"  x2="8"    y2="3.2"  stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  <line x1="8"    y1="12.8" x2="8"    y2="15.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  <line x1="0.4"  y1="8"    x2="3.2"  y2="8"    stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  <line x1="12.8" y1="8"    x2="15.6" y2="8"    stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+</svg>
