@@ -367,23 +367,27 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   Drone map markers (Leaflet divIcon). The SVG is inlined by map.rs; these
-   rules give it a transparent frame and spin the propeller while airborne.
+   Leaflet map markers.
+
+   NOTE: .drone-marker is already taken further up this file by the green
+   card badge. These air markers use .drone-air-marker so the two cannot
+   collide -- they did, and the green disc won.
    --------------------------------------------------------------------------- */
-.drone-div-icon {
+.drone-div-icon,
+.waypoint-div-icon {
   background: none;
   border: none;
 }
 
-.drone-marker {
+.drone-air-marker {
   transform-origin: 50% 50%;
-  transition: transform 900ms linear;
+  transition: transform 140ms linear;
   will-change: transform;
 }
 
-.drone-marker svg { display: block; width: 100%; height: 100%; }
+.drone-air-marker svg { display: block; width: 100%; height: 100%; }
 
-.drone-marker .drone-prop {
+.drone-air-marker .drone-prop {
   animation: drone-prop-spin 260ms linear infinite;
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -394,7 +398,15 @@ body {
   to   { transform: rotate(360deg); }
 }
 
+/* Waypoint pins: light red, matching the air markers rather than Leaflet blue */
+.wp-pin {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff5f5f;
+  border: 1px solid rgba(0, 0, 0, 0.65);
+  box-shadow: 0 0 6px rgba(255, 95, 95, 0.9);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .drone-marker { transition: none; }
-  .drone-marker .drone-prop { animation: none; }
+  .drone-air-marker { transition: none; }
+  .drone-air-marker .drone-prop { animation: none; }
 }

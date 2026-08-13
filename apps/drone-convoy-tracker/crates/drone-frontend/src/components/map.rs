@@ -27,6 +27,88 @@ fn inline_svg(svg: &str) -> &str {
     svg.find("<svg").map_or(svg, |i| &svg[i..])
 }
 
+/// Sortie route across the Kandahar AOR, ingress in the north-west, target run
+/// through the centre, egress south-east.
+///
+/// Client-side for now: the `waypoints` resolver is still a stub, and its
+/// repository method takes `_drone_id` and returns an empty vec. When that is
+/// wired up this constant is replaced by the query result and nothing else in
+/// this file changes.
+const ROUTE: [(f64, f64); 14] = [
+    (31.9800, 64.9000),
+    (31.9100, 65.0600),
+    (31.8300, 65.2100),
+    (31.7600, 65.3500),
+    (31.7000, 65.4900),
+    (31.6600, 65.6200),
+    (31.6289, 65.7372),
+    (31.5900, 65.8500),
+    (31.5400, 65.9600),
+    (31.4800, 66.0600),
+    (31.4100, 66.1500),
+    (31.3400, 66.2300),
+    (31.2600, 66.3100),
+    (31.1800, 66.3900),
+];
+
+/// Spacing between drones, in route legs. Enough to read as line astern
+/// without the airframes overlapping at map zoom 8.
+const CONVOY_SPACING_LEGS: f64 = 0.55;
+
+/// Animation tick. 120ms is smooth without flooding Leaflet with layer updates.
+const FLIGHT_TICK_MS: i32 = 120;
+
+/// Legs advanced per tick. The full route takes roughly three minutes.
+const LEGS_PER_TICK: f64 = 0.006;
+
+/// Position and heading at `progress` legs along ROUTE, wrapping at the end.
+///
+/// Returns the interpolated point plus a compass heading derived from the leg
+/// direction, so the airframe always points where it is going.
+fn route_point(progress: f64) -> (f64, f64, f64) {
+    let legs = (ROUTE.len() - 1) as f64;
+    let wrapped = progress.rem_euclid(legs);
+    let idx = wrapped.floor() as usize;
+    let frac = wrapped - wrapped.floor();
+
+    let (lat_a, lng_a) = ROUTE[idx];
+    let (lat_b, lng_b) = ROUTE[(idx + 1).min(ROUTE.len() - 1)];
+
+    let lat = lat_a + (lat_b - lat_a) * frac;
+    let lng = lng_a + (lng_b - lng_a) * frac;
+
+    // Longitude degrees shrink with latitude; without the cos correction the
+    // heading is visibly wrong at this latitude.
+    let d_lng = (lng_b - lng_a) * lat.to_radians().cos();
+    let d_lat = lat_b - lat_a;
+    let heading = d_lng.atan2(d_lat).to_degrees().rem_euclid(360.0);
+
+    (lat, lng, heading)
+}
+
+fn lat_lng(lat: f64, lng: f64) -> JsValue {
+    let arr = js_sys::Array::new();
+    arr.push(&JsValue::from_f64(lat));
+    arr.push(&JsValue::from_f64(lng));
+    arr.into()
+}
+
+/// A divIcon carrying arbitrary HTML at a given square size.
+fn html_icon(html: &str, class: &str, size: f64) -> DivIcon {
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(&opts, &"html".into(), &html.into()).ok();
+    js_sys::Reflect::set(&opts, &"className".into(), &class.into()).ok();
+    let dims = js_sys::Array::new();
+    dims.push(&JsValue::from_f64(size));
+    dims.push(&JsValue::from_f64(size));
+    js_sys::Reflect::set(&opts, &"iconSize".into(), &dims.into()).ok();
+    let anchor = js_sys::Array::new();
+    anchor.push(&JsValue::from_f64(size / 2.0));
+    anchor.push(&JsValue::from_f64(size / 2.0));
+    js_sys::Reflect::set(&opts, &"iconAnchor".into(), &anchor.into()).ok();
+    div_icon(&opts.into())
+}
+
 /// Leaflet map wrapper
 #[wasm_bindgen]
 extern "C" {
@@ -62,6 +144,9 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = setLatLng)]
     fn set_lat_lng(this: &Marker, lat_lng: &JsValue);
+
+    #[wasm_bindgen(method, js_name = getElement)]
+    fn get_element(this: &Marker) -> JsValue;
 
     #[wasm_bindgen(js_namespace = L)]
     type DivIcon;
@@ -172,61 +257,123 @@ pub fn MapPanel() -> impl IntoView {
             let aor_circle = create_circle(&aor_center.into(), &aor_options.into());
             aor_circle.circle_add_to(&map);
 
-            // Add drone markers
-            let drones = state.drones.get();
-            for drone in drones.values() {
-                let pos = &drone.position;
-                let marker_pos = js_sys::Array::new();
-                marker_pos.push(&JsValue::from_f64(pos.latitude));
-                marker_pos.push(&JsValue::from_f64(pos.longitude));
+            // ---------------------------------------------------------------
+            // Sortie route: red waypoint pins plus the track between them.
+            // ---------------------------------------------------------------
+            let track = js_sys::Array::new();
+            for (lat, lng) in ROUTE {
+                track.push(&lat_lng(lat, lng));
+            }
+            let track_opts = js_sys::Object::new();
+            js_sys::Reflect::set(&track_opts, &"color".into(), &"#ff5f5f".into()).ok();
+            js_sys::Reflect::set(&track_opts, &"weight".into(), &JsValue::from_f64(1.5)).ok();
+            js_sys::Reflect::set(&track_opts, &"opacity".into(), &JsValue::from_f64(0.45)).ok();
+            js_sys::Reflect::set(&track_opts, &"dashArray".into(), &"6, 8".into()).ok();
+            create_polyline(&track.into(), &track_opts.into()).polyline_add_to(&map);
 
+            for (i, (lat, lng)) in ROUTE.iter().enumerate() {
+                let pin_opts = js_sys::Object::new();
+                js_sys::Reflect::set(
+                    &pin_opts,
+                    &"icon".into(),
+                    &JsValue::from(html_icon(
+                        "<div class=\"wp-pin\"></div>",
+                        "waypoint-div-icon",
+                        10.0,
+                    )),
+                )
+                .ok();
+                let pin = create_marker(&lat_lng(*lat, *lng), &pin_opts.into());
+                pin.bind_popup(&format!("WP {}", i + 1));
+                pin.marker_add_to(&map);
+            }
+
+            // ---------------------------------------------------------------
+            // Convoy: one marker per drone, flying the route line astern.
+            // ---------------------------------------------------------------
+            let drones = state.drones.get_untracked();
+            let mut ordered: Vec<_> = drones.values().cloned().collect();
+            // Stable order, so a drone keeps its slot in the formation across
+            // re-renders instead of shuffling with HashMap iteration order.
+            ordered.sort_by(|a, b| a.callsign.cmp(&b.callsign));
+
+            let mut markers: Vec<Marker> = Vec::with_capacity(ordered.len());
+
+            for drone in &ordered {
                 let accent = status_accent(&drone.status);
                 let html = format!(
-                    "<div class=\"drone-marker\" style=\"--drone-accent:{accent};\
-                     width:38px;height:38px;transform:rotate({heading:.0}deg);\
-                     filter:drop-shadow(0 0 4px {accent});\">{svg}</div>",
+                    "<div class=\"drone-air-marker\" style=\"--drone-accent:{accent};\
+                     width:34px;height:34px;filter:drop-shadow(0 0 5px {accent});\">{svg}</div>",
                     accent = accent,
-                    heading = pos.heading_deg,
                     svg = inline_svg(DRONE_SVG),
                 );
 
-                let icon_options = js_sys::Object::new();
-                js_sys::Reflect::set(&icon_options, &"html".into(), &html.as_str().into()).ok();
-                js_sys::Reflect::set(&icon_options, &"className".into(), &"drone-div-icon".into()).ok();
-                let icon_size = js_sys::Array::new();
-                icon_size.push(&JsValue::from_f64(38.0));
-                icon_size.push(&JsValue::from_f64(38.0));
-                js_sys::Reflect::set(&icon_options, &"iconSize".into(), &icon_size.into()).ok();
-                let icon_anchor = js_sys::Array::new();
-                icon_anchor.push(&JsValue::from_f64(19.0));
-                icon_anchor.push(&JsValue::from_f64(19.0));
-                js_sys::Reflect::set(&icon_options, &"iconAnchor".into(), &icon_anchor.into()).ok();
-
-                let marker_options = js_sys::Object::new();
+                let opts = js_sys::Object::new();
                 js_sys::Reflect::set(
-                    &marker_options,
+                    &opts,
                     &"icon".into(),
-                    &JsValue::from(div_icon(&icon_options.into())),
+                    &JsValue::from(html_icon(&html, "drone-div-icon", 34.0)),
                 )
                 .ok();
 
-                let marker = create_marker(&marker_pos.into(), &marker_options.into());
-                
-                let popup_content = format!(
-                    "<div style='font-family: monospace; color: #00ff41; background: #0a0f0d; padding: 8px; border: 1px solid #00ff41;'>\
-                    <b style='color: #00ff41;'>{}</b><br/>\
-                    <span style='color: #557755;'>ALT:</span> {:.0}m<br/>\
-                    <span style='color: #557755;'>HDG:</span> {:.0}°<br/>\
-                    <span style='color: #557755;'>SPD:</span> {:.0} m/s<br/>\
-                    <span style='color: #557755;'>FUEL:</span> {:.1}%\
-                    </div>",
-                    drone.callsign, pos.altitude_m, pos.heading_deg, pos.speed_mps, drone.fuel_pct
-                );
-                marker.bind_popup(&popup_content);
+                let marker = create_marker(&lat_lng(ROUTE[0].0, ROUTE[0].1), &opts.into());
+                marker.bind_popup(&format!(
+                    "<div style='font-family: monospace; color: #00ff41; background: #0a0f0d; \
+                     padding: 8px; border: 1px solid #00ff41;'>\
+                     <b>{}</b><br/><span style='color:#557755;'>FUEL:</span> {:.0}%\
+                     <br/><span style='color:#557755;'>ACC:</span> {:.1}%</div>",
+                    drone.callsign, drone.fuel_pct, drone.accuracy_pct
+                ));
                 marker.marker_add_to(&map);
+                markers.push(marker);
             }
 
-            log::info!("Map initialized with {} drone markers", drones.len());
+            // ---------------------------------------------------------------
+            // Flight loop. Each drone sits CONVOY_SPACING_LEGS behind the one
+            // ahead, so the formation reads as line astern along the track.
+            // ---------------------------------------------------------------
+            let progress = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
+            let tick = {
+                let progress = progress.clone();
+                move || {
+                    let t = progress.get() + LEGS_PER_TICK;
+                    progress.set(t);
+
+                    for (i, marker) in markers.iter().enumerate() {
+                        let offset = t - (i as f64) * CONVOY_SPACING_LEGS;
+                        if offset < 0.0 {
+                            continue; // still holding at the IP
+                        }
+                        let (lat, lng, heading) = route_point(offset);
+                        marker.set_lat_lng(&lat_lng(lat, lng));
+
+                        // Leaflet owns the transform on the icon container, so
+                        // rotate the inner element instead of fighting it.
+                        let el = marker.get_element();
+                        if let Some(el) = el.dyn_ref::<web_sys::Element>() {
+                            if let Some(inner) = el.first_element_child() {
+                                if let Some(inner) = inner.dyn_ref::<web_sys::HtmlElement>() {
+                                    let _ = inner
+                                        .style()
+                                        .set_property("transform", &format!("rotate({heading:.0}deg)"));
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            let flight = Closure::wrap(Box::new(tick) as Box<dyn Fn()>);
+            if let Some(window) = web_sys::window() {
+                let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                    flight.as_ref().unchecked_ref(),
+                    FLIGHT_TICK_MS,
+                );
+            }
+            // Runs for the life of the page; dropping it would kill the callback.
+            flight.forget();
+
+            log::info!("map ready: {} drones on a {}-waypoint route", ordered.len(), ROUTE.len());
         }) as Box<dyn FnOnce()>);
 
         let window = web_sys::window().unwrap();

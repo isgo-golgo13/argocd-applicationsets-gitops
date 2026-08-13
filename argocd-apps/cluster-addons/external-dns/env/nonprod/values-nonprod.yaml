@@ -1,0 +1,7 @@
+# Environment overlay: nonprod.
+external-dns:
+  txtOwnerId: nonprod
+  # Non-production clusters often share a zone, so scope records by environment
+  # rather than letting all four clusters claim the same names.
+  domainFilters:
+    - nonprod.example.internal

@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# cluster-addons/external-dns/values.yaml -- COMMON base, all environments.
+#
+# Sources are Gateway API routes, NOT ingress. That is the whole point of
+# including this addon: cluster-apps charts declare
+#
+#   hostnames: [drone-convoy-tracker.prod.example.internal]
+#
+# in their HTTPRoute, and the DNS record follows. Nothing registers hostnames
+# by hand, and no chart needs to know which DNS provider is behind it.
+#
+# NOTE ON GATEWAY API VERSIONS: recent ExternalDNS releases read Gateway and
+# HTTPRoute at gateway.networking.k8s.io/v1 (they were previously v1beta1).
+# The cluster-apps chart already emits v1, so the two agree -- but an older
+# ExternalDNS pin against a v1-only cluster silently finds no routes.
+#
+# The provider below is intentionally left unset. It is the one value that is
+# genuinely site-specific, and a reference repository should not pick a DNS
+# vendor on the reader's behalf. Set provider.name plus its credentials per
+# environment, or point it at the webhook provider.
+# ---------------------------------------------------------------------------
+
+external-dns:
+  sources:
+    - gateway-httproute
+
+  policy: sync
+
+  # Ownership registry. Without a distinct owner id, two clusters sharing a
+  # zone will fight over the same records and delete each other's.
+  txtOwnerId: CHANGEME-CLUSTER
+  txtPrefix: extdns-
+
+  interval: 1m
+
+  provider:
+    name: ""     # CHANGEME per environment
+
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+
+  serviceMonitor:
+    enabled: false

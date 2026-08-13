@@ -31,7 +31,10 @@ pub async fn fetch_leaderboard(
     convoy_id: Uuid,
     limit: u32,
 ) -> Result<Vec<LeaderboardEntry>, String> {
+    // The query declares $convoyId. Without the rename this serialises as
+    // "convoy_id" and the server rejects the variables on every single poll.
     #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct Variables {
         convoy_id: String,
         limit: u32,

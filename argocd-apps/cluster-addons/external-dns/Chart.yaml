@@ -1,0 +1,14 @@
+apiVersion: v2
+name: external-dns
+description: >-
+  ExternalDNS -- publishes DNS records for Gateway API HTTPRoutes. Pairs with
+  the Cilium Gateway API decision: application charts declare a hostname in
+  their HTTPRoute and the record appears, instead of hostnames being registered
+  out of band.
+type: application
+version: 1.0.0
+dependencies:
+  - name: external-dns
+    # Re-pin against `helm search repo external-dns --versions` before delivery.
+    version: 1.21.1
+    repository: https://kubernetes-sigs.github.io/external-dns/

@@ -1,0 +1,11 @@
+# Environment overlay: prod.
+external-dns:
+  txtOwnerId: prod
+  domainFilters:
+    - prod.example.internal
+  # upsert-only in production: a route deleted by mistake should not take the
+  # DNS record with it. Revisit once you trust the promotion pipeline.
+  policy: upsert-only
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
