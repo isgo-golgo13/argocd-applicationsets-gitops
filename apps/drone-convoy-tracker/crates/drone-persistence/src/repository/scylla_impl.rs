@@ -1502,6 +1502,7 @@ fn threat_level_str(t: &ThreatLevel) -> &'static str {
         ThreatLevel::High => "HIGH",
         ThreatLevel::Medium => "MEDIUM",
         ThreatLevel::Low => "LOW",
+        ThreatLevel::Unknown => "UNKNOWN",
     }
 }
 
