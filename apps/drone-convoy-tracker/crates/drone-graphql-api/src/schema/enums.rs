@@ -6,16 +6,27 @@ use async_graphql::Enum;
 use drone_domain as domain;
 
 /// Drone platform type
+///
+/// Wire names are pinned explicitly. async-graphql's SCREAMING_SNAKE_CASE
+/// rename runs through Inflector, whose `char_is_uppercase` is
+/// `c == c.to_ascii_uppercase()` — TRUE for digits — so `Mq9Reaper` would
+/// serialize as `MQ_9_REAPER`, not the `MQ9_REAPER` every caller (simulator,
+/// frontend match arms, stored rows) expects. Pinning removes the rename
+/// engine from the contract entirely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enum)]
 #[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
 pub enum PlatformType {
     /// MQ-9 Reaper - Primary strike/ISR platform
+    #[graphql(name = "MQ9_REAPER")]
     Mq9Reaper,
     /// MQ-1C Gray Eagle - Army tactical UAS
+    #[graphql(name = "MQ1C_GRAY_EAGLE")]
     Mq1cGrayEagle,
     /// RQ-4 Global Hawk - High-altitude ISR
+    #[graphql(name = "RQ4_GLOBAL_HAWK")]
     Rq4GlobalHawk,
     /// MQ-25 Stingray - Carrier-based refueling
+    #[graphql(name = "MQ25_STINGRAY")]
     Mq25Stingray,
 }
 
@@ -179,18 +190,29 @@ impl From<domain::WaypointStatus> for WaypointStatus {
 }
 
 /// Weapon type
+///
+/// Wire names pinned for the same reason as [`PlatformType`]: Inflector
+/// treats digits as uppercase, so `Agm114Hellfire` would otherwise serialize
+/// as `AGM_114_HELLFIRE` and every simulator post would be rejected with
+/// "enumeration type WeaponType does not contain the value" — which is
+/// precisely what happened on the first live run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enum)]
 #[graphql(rename_items = "SCREAMING_SNAKE_CASE")]
 pub enum WeaponType {
     /// AGM-114 Hellfire missile
+    #[graphql(name = "AGM114_HELLFIRE")]
     Agm114Hellfire,
     /// GBU-12 Paveway II laser-guided bomb
+    #[graphql(name = "GBU12_PAVEWAY")]
     Gbu12Paveway,
     /// AIM-9X Sidewinder air-to-air
+    #[graphql(name = "AIM9X_SIDEWINDER")]
     Aim9xSidewinder,
     /// GBU-38 JDAM GPS-guided bomb
+    #[graphql(name = "GBU38_JDAM")]
     Gbu38Jdam,
     /// AGM-176 Griffin small tactical munition
+    #[graphql(name = "AGM176_GRIFFIN")]
     Agm176Griffin,
 }
 

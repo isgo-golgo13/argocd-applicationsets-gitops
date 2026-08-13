@@ -82,8 +82,15 @@ async fn main() -> Result<()> {
     // -------------------------------------------------------------------------
     // BOOTSTRAP — register convoy, routes and drones before the first tick,
     // so the dashboard has real rows to render from second one.
+    //
+    // The API is polled to readiness first: `make serve` compiles the API in
+    // release while trunk builds the frontend, so for the first minute or two
+    // the port may not be listening. Bootstrap is one-shot — firing it into
+    // that window loses the convoy and every drone's identity silently, and
+    // the dashboard then shows four UNKNOWNs collapsed onto one map marker.
     // -------------------------------------------------------------------------
     if !args.dry_run {
+        wait_for_api(&client, &args.api_url).await;
         bootstrap(&client, &args, &convoy).await;
     }
 
@@ -176,6 +183,35 @@ async fn main() -> Result<()> {
 // =============================================================================
 // BOOTSTRAP
 // =============================================================================
+
+/// Block until the GraphQL endpoint answers a trivial query, up to ~3 minutes.
+///
+/// Probes the same URL the mutations use (no URL surgery, no separate health
+/// path to misconfigure). On timeout the simulator proceeds anyway — the
+/// per-tick posts self-heal identity — but says so loudly.
+async fn wait_for_api(client: &Client, api_url: &str) {
+    const ATTEMPTS: u32 = 180;
+    for attempt in 1..=ATTEMPTS {
+        let probe = client
+            .post(api_url)
+            .json(&json!({ "query": "{ health }" }))
+            .send()
+            .await;
+        if let Ok(resp) = probe {
+            if resp.status().is_success() {
+                if attempt > 1 {
+                    info!("API ready after {attempt}s");
+                }
+                return;
+            }
+        }
+        if attempt % 5 == 1 {
+            info!("waiting for API at {api_url} ({attempt}/{ATTEMPTS})...");
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    warn!("API not reachable after {ATTEMPTS}s — starting anyway; bootstrap posts may be lost");
+}
 
 /// Register convoy, waypoint routes and drone identities with the API.
 ///
@@ -304,6 +340,12 @@ async fn post_telemetry(
 
 /// Mirror the snapshot onto the drone row, with a status derived from
 /// mission progress: AIRBORNE → INGRESS → EGRESS → RTB.
+///
+/// Identity (callsign, platform, route length) rides on EVERY tick, not just
+/// bootstrap. `updateDroneState` is a read-merge-write upsert server-side, so
+/// this is idempotent — and it means a drone whose registration was lost
+/// (API race, restart, packet into the void) heals within one tick instead
+/// of flying as UNKNOWN forever.
 async fn post_drone_state(
     client: &Client,
     api_url: &str,
@@ -318,6 +360,8 @@ async fn post_drone_state(
         _ => "RTB",
     };
 
+    let identity = convoy.drones.get(&snap.drone_id);
+
     let query = r#"
         mutation UpdateDroneState($input: UpdateDroneStateInput!) {
             updateDroneState(input: $input) { droneId }
@@ -330,6 +374,9 @@ async fn post_drone_state(
             "status": status,
             "fuelPct": f64::from(snap.fuel_remaining_pct),
             "currentWaypoint": snap.current_waypoint as i32,
+            "callsign": identity.map(|d| d.callsign.clone()),
+            "platformType": identity.map(|d| d.platform_type.clone()),
+            "totalWaypoints": identity.map(|d| d.waypoints.len() as i32),
             "position": {
                 "latitude": snap.position.latitude,
                 "longitude": snap.position.longitude,
