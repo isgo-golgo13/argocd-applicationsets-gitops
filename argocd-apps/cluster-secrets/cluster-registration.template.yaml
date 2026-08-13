@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# cluster-registration.template.yaml -- UNENCRYPTED TEMPLATE. NEVER APPLIED.
+#
+# This file documents the exact Secret each spoke registration must contain.
+# The cluster-secrets Application applies ONLY sealed-*.yaml (directory
+# include filter), so this template can live here safely -- but the filled-in
+# version of this file MUST NEVER be committed. The workflow is:
+#
+#   fill a copy -> kubeseal it -> commit ONLY the sealed output -> delete copy
+#
+# Full per-spoke walkthrough: spec-README.md in this directory.
+#
+# LABELS. Two matter:
+#   argocd.argoproj.io/secret-type: cluster   makes ArgoCD treat this Secret
+#                                             as a cluster registration.
+#   env: <nonprod|preprod|uat|prod>           does nothing today (the list
+#     generator in app-sets/values.yaml names clusters explicitly), but it is
+#     the hook for the documented post-delivery refinement: swap the list
+#     generator for the CLUSTER generator selecting on this label, and adding
+#     a cluster becomes committing one sealed Secret -- no repo edit at all.
+#     Stamp it now so the refinement is a generator change, not a re-seal.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  # Convention: cluster-<env>. Must be unique per registration.
+  name: cluster-nonprod
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    env: nonprod
+type: Opaque
+stringData:
+  # Display name ArgoCD shows; keep it equal to the list-generator entry's
+  # name in app-sets/values.yaml.
+  name: nonprod
+  # API server URL. MUST byte-match the corresponding clusters[].url in
+  # app-sets/values.yaml -- ArgoCD resolves destinations by URL, and a
+  # mismatch produces "cluster not found" on every generated Application.
+  server: https://k8s.nonprod.example.internal
+  # Credentials for a dedicated ServiceAccount on the SPOKE (created in the
+  # walkthrough). bearerToken + the spoke's CA; TLS client certs work the
+  # same way via tlsClientConfig.certData/keyData.
+  config: |
+    {
+      "bearerToken": "<spoke argocd-manager ServiceAccount token>",
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "<base64 spoke cluster CA certificate>"
+      }
+    }
