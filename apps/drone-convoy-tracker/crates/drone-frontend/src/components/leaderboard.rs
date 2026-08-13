@@ -22,6 +22,16 @@ pub fn LeaderboardPanel() -> impl IntoView {
             </div>
             <div class="panel-body no-padding">
                 <div class="leaderboard">
+                    // An empty result renders an explicit empty state, so a
+                    // fresh database is distinguishable from a broken query —
+                    // a bare header has already been misread as a bug once.
+                    {move || entries().is_empty().then(|| view! {
+                        <div class="leaderboard-entry" style="justify-content: center;">
+                            <span class="text-xs text-muted uppercase tracking-wide">
+                                "NO ENGAGEMENTS RECORDED"
+                            </span>
+                        </div>
+                    })}
                     <For
                         each=entries
                         key=|entry| entry.drone_id

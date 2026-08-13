@@ -1,6 +1,12 @@
 //! # Drone Convoy Tracker Frontend
 //!
 //! Tactical HUD for military drone convoy tracking and leaderboard display.
+//!
+//! Every panel is live. There is no seed data in this crate: the leaderboard,
+//! drone cards, convoy status, engagement feed, telemetry chart and the map's
+//! airframes are all driven by the 2-second poll below against the GraphQL
+//! API, which reads ScyllaDB. An empty panel means an empty table — start the
+//! simulator.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::all)]
@@ -18,18 +24,24 @@ use components::*;
 use wasm_bindgen::JsCast;
 use state::*;
 
-/// Leaderboard poll interval. The GraphQL subscription route is not yet mounted
-/// server-side, so the dashboard pulls rather than being pushed to. Swap this
-/// for `use_websocket` once `/graphql/ws` is enabled.
+/// Poll interval for the live feed. The `/graphql/ws` subscription route is
+/// mounted server-side now; swapping this poll for `use_websocket` is the
+/// next step, but polling is the fallback either way.
 const POLL_INTERVAL_MS: i32 = 2_000;
+
+/// The well-known demo convoy. The simulator pins its writes to this id
+/// (overridable via DRONE_CONVOY_ID), so the dashboard tracks it IMMEDIATELY
+/// on load instead of waiting for a convoy-list round trip — that await was
+/// worth 20+ seconds of OFFLINE on every refresh. `activeConvoys` is still
+/// queried right after and overrides this if a different convoy is live.
+const DEMO_CONVOY_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+
+/// Points kept in the rolling telemetry chart (~1 minute at 2s per point).
+const TELEMETRY_SERIES_CAP: usize = 30;
 
 #[component]
 pub fn App() -> impl IntoView {
     provide_app_state();
-    // Positions and the engagement feed still come from a seed: the resolvers
-    // behind them are stubs (see start_live_feed).
-    seed_static_panels();
-    // The leaderboard is real: simulator -> recordEngagement -> ScyllaDB -> here.
     start_live_feed();
 
     view! {
@@ -85,16 +97,19 @@ fn ToastContainer() -> impl IntoView {
     }
 }
 
-/// Poll the real leaderboard and push it into state.
+/// Start the live feed for every panel.
 ///
-/// This is the one path that is live end to end today. `recordEngagement`
-/// writes through `ScyllaLeaderboardRepository`, and the `leaderboard` query
-/// reads back from it -- no stub in between.
-///
-/// `ws_connected` now reflects whether the last poll actually succeeded,
-/// instead of being set to true unconditionally.
+/// The demo convoy id is selected synchronously so the first poll fires on
+/// the first tick — ONLINE within one interval of page load. The convoy list
+/// is then fetched in the background purely to override the selection if a
+/// different convoy is actually live.
 fn start_live_feed() {
     let state = use_app_state();
+
+    state.mission_start.set(Some(Utc::now()));
+    if let Ok(id) = Uuid::parse_str(DEMO_CONVOY_ID) {
+        state.selected_convoy.set(Some(id));
+    }
 
     spawn_local(async move {
         match services::fetch_active_convoys().await {
@@ -104,24 +119,31 @@ fn start_live_feed() {
                         state.selected_convoy.set(Some(id));
                         log::info!("tracking convoy {} ({})", first.callsign, id);
                     }
+                } else {
+                    log::info!(
+                        "no active convoys yet; tracking demo convoy until the simulator bootstraps"
+                    );
                 }
             }
-            Err(err) => {
-                log::error!("could not list convoys: {err}");
-                state.ws_connected.set(false);
-            }
+            Err(err) => log::warn!("could not list convoys: {err}"),
         }
-
-        poll_leaderboard(state);
     });
+
+    poll_live_data(state);
 }
 
-fn poll_leaderboard(state: AppState) {
+/// The 2-second tick behind every panel.
+///
+/// Three queries per tick — leaderboard, drones, engagements. `ws_connected`
+/// reflects whether the leaderboard poll (the cheapest, always-valid one)
+/// succeeded, so the ONLINE pill is an honest link indicator.
+fn poll_live_data(state: AppState) {
     let tick = move || {
         spawn_local(async move {
             let Some(convoy_id) = state.selected_convoy.get_untracked() else {
                 return;
             };
+
             match services::fetch_leaderboard(convoy_id, 10).await {
                 Ok(entries) => {
                     state.ws_connected.set(true);
@@ -131,6 +153,35 @@ fn poll_leaderboard(state: AppState) {
                     state.ws_connected.set(false);
                     log::warn!("leaderboard poll failed: {err}");
                 }
+            }
+
+            match services::fetch_drones(convoy_id).await {
+                Ok(drones) => {
+                    push_telemetry_point(state, &drones);
+                    state.drones.set(drones.into_iter().map(|d| (d.drone_id, d)).collect());
+                }
+                Err(err) => log::warn!("drones poll failed: {err}"),
+            }
+
+            match services::fetch_engagements(convoy_id, 20).await {
+                Ok(mut engagements) => {
+                    // The engagement record carries no post-shot accuracy;
+                    // stamp it from the freshest leaderboard so the feed
+                    // reads like the subscription event would.
+                    let accuracy: std::collections::HashMap<Uuid, f32> = state
+                        .leaderboard
+                        .get_untracked()
+                        .iter()
+                        .map(|e| (e.drone_id, e.accuracy_pct))
+                        .collect();
+                    for e in &mut engagements {
+                        if let Some(acc) = accuracy.get(&e.drone_id) {
+                            e.new_accuracy_pct = *acc;
+                        }
+                    }
+                    state.engagements.set(engagements);
+                }
+                Err(err) => log::warn!("engagements poll failed: {err}"),
             }
         });
     };
@@ -149,94 +200,30 @@ fn poll_leaderboard(state: AppState) {
     closure.forget();
 }
 
-/// Seed for the panels whose resolvers are still stubs: drone positions,
-/// telemetry and the engagement feed. Everything here is placeholder data and
-/// is replaced the moment `getDrones` / `engagements` are wired to their
-/// repositories -- which already exist in drone-persistence.
-fn seed_static_panels() {
-    let state = use_app_state();
-    state.mission_start.set(Some(Utc::now() - chrono::Duration::hours(2)));
+/// Append one convoy-average sample to the rolling telemetry series.
+///
+/// Averages across airborne assets keep the chart meaningful as drones join
+/// and leave; the cap keeps it a sliding window rather than a full history.
+fn push_telemetry_point(state: AppState, drones: &[DroneState]) {
+    if drones.is_empty() {
+        return;
+    }
+    let n = drones.len() as f64;
+    let avg_altitude_m = drones.iter().map(|d| d.position.altitude_m).sum::<f64>() / n;
+    let avg_fuel_pct = drones.iter().map(|d| f64::from(d.fuel_pct)).sum::<f64>() / n;
+    let label = Utc::now().format("%H:%M:%S").to_string();
 
-    let convoy_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
-    state.selected_convoy.set(Some(convoy_id));
-
-    let leaderboard = vec![
-        LeaderboardEntry {
-            drone_id: Uuid::new_v4(),
-            callsign: "REAPER-01".into(),
-            platform_type: "MQ9_REAPER".into(),
-            rank: 1, accuracy_pct: 94.5, total_engagements: 18, successful_hits: 17,
-            current_streak: 8, best_streak: 12, rank_change: 0,
-        },
-        LeaderboardEntry {
-            drone_id: Uuid::new_v4(),
-            callsign: "HAWK-07".into(),
-            platform_type: "MQ1C_GRAY_EAGLE".into(),
-            rank: 2, accuracy_pct: 91.2, total_engagements: 23, successful_hits: 21,
-            current_streak: 5, best_streak: 9, rank_change: 1,
-        },
-        LeaderboardEntry {
-            drone_id: Uuid::new_v4(),
-            callsign: "SHADOW-12".into(),
-            platform_type: "MQ9_REAPER".into(),
-            rank: 3, accuracy_pct: 88.9, total_engagements: 9, successful_hits: 8,
-            current_streak: 3, best_streak: 6, rank_change: -1,
-        },
-        LeaderboardEntry {
-            drone_id: Uuid::new_v4(),
-            callsign: "VIPER-03".into(),
-            platform_type: "MQ9_REAPER".into(),
-            rank: 4, accuracy_pct: 85.7, total_engagements: 14, successful_hits: 12,
-            current_streak: 0, best_streak: 4, rank_change: 0,
-        },
-        LeaderboardEntry {
-            drone_id: Uuid::new_v4(),
-            callsign: "EAGLE-09".into(),
-            platform_type: "RQ4_GLOBAL_HAWK".into(),
-            rank: 5, accuracy_pct: 80.0, total_engagements: 5, successful_hits: 4,
-            current_streak: 2, best_streak: 3, rank_change: 2,
-        },
-    ];
-    state.leaderboard.set(leaderboard);
-
-    let drones = vec![
-        DroneState {
-            drone_id: Uuid::new_v4(), convoy_id,
-            callsign: "REAPER-01".into(), tail_number: "AF-001".into(),
-            platform_type: "MQ9_REAPER".into(), status: DroneStatus::Airborne,
-            position: Coordinates { latitude: 31.6289, longitude: 65.7372, altitude_m: 5000.0, heading_deg: 45.0, speed_mps: 80.0 },
-            fuel_pct: 72.5, accuracy_pct: 94.5, current_waypoint: 15, total_waypoints: 25, updated_at: Utc::now(),
-        },
-        DroneState {
-            drone_id: Uuid::new_v4(), convoy_id,
-            callsign: "HAWK-07".into(), tail_number: "AF-007".into(),
-            platform_type: "MQ1C_GRAY_EAGLE".into(), status: DroneStatus::Loiter,
-            position: Coordinates { latitude: 31.75, longitude: 65.85, altitude_m: 4500.0, heading_deg: 90.0, speed_mps: 45.0 },
-            fuel_pct: 58.0, accuracy_pct: 91.2, current_waypoint: 18, total_waypoints: 25, updated_at: Utc::now(),
-        },
-        DroneState {
-            drone_id: Uuid::new_v4(), convoy_id,
-            callsign: "SHADOW-12".into(), tail_number: "AF-012".into(),
-            platform_type: "MQ9_REAPER".into(), status: DroneStatus::Ingress,
-            position: Coordinates { latitude: 31.5, longitude: 65.5, altitude_m: 5500.0, heading_deg: 270.0, speed_mps: 95.0 },
-            fuel_pct: 35.0, accuracy_pct: 88.9, current_waypoint: 20, total_waypoints: 25, updated_at: Utc::now(),
-        },
-        DroneState {
-            drone_id: Uuid::new_v4(), convoy_id,
-            callsign: "VIPER-03".into(), tail_number: "AF-003".into(),
-            platform_type: "MQ9_REAPER".into(), status: DroneStatus::Rtb,
-            position: Coordinates { latitude: 31.4, longitude: 65.9, altitude_m: 3000.0, heading_deg: 180.0, speed_mps: 110.0 },
-            fuel_pct: 18.0, accuracy_pct: 85.7, current_waypoint: 23, total_waypoints: 25, updated_at: Utc::now(),
-        },
-    ];
-    state.drones.update(|map| { for d in drones { map.insert(d.drone_id, d); } });
-
-    let engagements = vec![
-        EngagementEvent { id: Uuid::new_v4(), drone_id: Uuid::new_v4(), callsign: "REAPER-01".into(), hit: true, weapon_type: "AGM114_HELLFIRE".into(), new_accuracy_pct: 94.5, timestamp: Utc::now() - chrono::Duration::minutes(5) },
-        EngagementEvent { id: Uuid::new_v4(), drone_id: Uuid::new_v4(), callsign: "HAWK-07".into(), hit: true, weapon_type: "GBU12_PAVEWAY".into(), new_accuracy_pct: 91.2, timestamp: Utc::now() - chrono::Duration::minutes(12) },
-        EngagementEvent { id: Uuid::new_v4(), drone_id: Uuid::new_v4(), callsign: "SHADOW-12".into(), hit: false, weapon_type: "AGM114_HELLFIRE".into(), new_accuracy_pct: 88.9, timestamp: Utc::now() - chrono::Duration::minutes(18) },
-    ];
-    state.engagements.set(engagements);
+    state.telemetry_series.update(|series| {
+        series.push(TelemetryPoint {
+            label,
+            avg_altitude_m,
+            avg_fuel_pct,
+        });
+        if series.len() > TELEMETRY_SERIES_CAP {
+            let excess = series.len() - TELEMETRY_SERIES_CAP;
+            series.drain(0..excess);
+        }
+    });
 }
 
 pub fn main() {

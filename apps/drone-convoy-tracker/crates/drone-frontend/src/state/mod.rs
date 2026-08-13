@@ -16,6 +16,9 @@ pub struct AppState {
     pub leaderboard: RwSignal<Vec<LeaderboardEntry>>,
     pub drones: RwSignal<HashMap<Uuid, DroneState>>,
     pub engagements: RwSignal<Vec<EngagementEvent>>,
+    /// Rolling convoy-average telemetry, one point per poll tick. The chart
+    /// reads this reactively; `lib.rs` appends and caps it.
+    pub telemetry_series: RwSignal<Vec<TelemetryPoint>>,
     pub ws_connected: RwSignal<bool>,
     pub mission_start: RwSignal<Option<DateTime<Utc>>>,
     pub alerts: RwSignal<Vec<Alert>>,
@@ -29,11 +32,21 @@ impl AppState {
             leaderboard: RwSignal::new(Vec::new()),
             drones: RwSignal::new(HashMap::new()),
             engagements: RwSignal::new(Vec::new()),
+            telemetry_series: RwSignal::new(Vec::new()),
             ws_connected: RwSignal::new(false),
             mission_start: RwSignal::new(None),
             alerts: RwSignal::new(Vec::new()),
         }
     }
+}
+
+/// One convoy-average telemetry sample for the flight telemetry chart.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TelemetryPoint {
+    /// X-axis label (HH:MM:SS of the poll).
+    pub label: String,
+    pub avg_altitude_m: f64,
+    pub avg_fuel_pct: f64,
 }
 
 impl Default for AppState {

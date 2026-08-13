@@ -300,43 +300,89 @@ pub fn MapPanel() -> impl IntoView {
 
             // ---------------------------------------------------------------
             // Convoy: one marker per drone, flying the route line astern.
+            //
+            // Markers are created INCREMENTALLY. At mount the drones map is
+            // empty — state fills from the 2s poll — so a one-shot snapshot
+            // here would put zero airframes on the map forever. A sync
+            // interval watches state and adds a marker for every callsign it
+            // hasn't seen; the flight loop animates whatever exists.
             // ---------------------------------------------------------------
-            let drones = state.drones.get_untracked();
-            let mut ordered: Vec<_> = drones.values().cloned().collect();
-            // Stable order, so a drone keeps its slot in the formation across
-            // re-renders instead of shuffling with HashMap iteration order.
-            ordered.sort_by(|a, b| a.callsign.cmp(&b.callsign));
+            use std::cell::RefCell;
+            use std::rc::Rc;
 
-            let mut markers: Vec<Marker> = Vec::with_capacity(ordered.len());
+            let markers: Rc<RefCell<Vec<(String, Marker)>>> = Rc::new(RefCell::new(Vec::new()));
 
-            for drone in &ordered {
-                let accent = status_accent(&drone.status);
-                let html = format!(
-                    "<div class=\"drone-air-marker\" style=\"--drone-accent:{accent};\
-                     width:34px;height:34px;filter:drop-shadow(0 0 5px {accent});\">{svg}</div>",
-                    accent = accent,
-                    svg = inline_svg(DRONE_SVG),
+            let sync = {
+                let markers = Rc::clone(&markers);
+                let map = map.clone();
+                move || {
+                    let drones = state.drones.get_untracked();
+                    let mut ordered: Vec<_> = drones.values().cloned().collect();
+                    // Stable order, so a drone keeps its slot in the formation
+                    // instead of shuffling with HashMap iteration order.
+                    ordered.sort_by(|a, b| a.callsign.cmp(&b.callsign));
+
+                    let mut known = markers.borrow_mut();
+                    for drone in &ordered {
+                        let accent = status_accent(&drone.status);
+                        let popup = format!(
+                            "<div style='font-family: monospace; color: #00ff41; background: #0a0f0d; \
+                             padding: 8px; border: 1px solid #00ff41;'>\
+                             <b>{}</b><br/><span style='color:#557755;'>FUEL:</span> {:.0}%\
+                             <br/><span style='color:#557755;'>ACC:</span> {:.1}%</div>",
+                            drone.callsign, drone.fuel_pct, drone.accuracy_pct
+                        );
+
+                        if let Some((_, marker)) =
+                            known.iter().find(|(cs, _)| cs == &drone.callsign)
+                        {
+                            // Existing airframe: refresh the popup so FUEL/ACC
+                            // track the live values instead of the join-time
+                            // snapshot.
+                            marker.bind_popup(&popup);
+                            continue;
+                        }
+
+                        let html = format!(
+                            "<div class=\"drone-air-marker\" style=\"--drone-accent:{accent};\
+                             width:34px;height:34px;filter:drop-shadow(0 0 5px {accent});\">{svg}</div>",
+                            accent = accent,
+                            svg = inline_svg(DRONE_SVG),
+                        );
+
+                        let opts = js_sys::Object::new();
+                        js_sys::Reflect::set(
+                            &opts,
+                            &"icon".into(),
+                            &JsValue::from(html_icon(&html, "drone-div-icon", 34.0)),
+                        )
+                        .ok();
+
+                        let marker = create_marker(&lat_lng(ROUTE[0].0, ROUTE[0].1), &opts.into());
+                        marker.bind_popup(&popup);
+                        marker.marker_add_to(&map);
+
+                        // Insert in callsign order so the formation slot is
+                        // deterministic no matter the join order.
+                        let at = known
+                            .iter()
+                            .position(|(cs, _)| cs.as_str() > drone.callsign.as_str())
+                            .unwrap_or(known.len());
+                        known.insert(at, (drone.callsign.clone(), marker));
+                        log::info!("map: airframe joined — {}", drone.callsign);
+                    }
+                }
+            };
+            // First sync immediately (covers a fast poll), then every second.
+            sync();
+            let sync_closure = Closure::wrap(Box::new(sync) as Box<dyn Fn()>);
+            if let Some(window) = web_sys::window() {
+                let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                    sync_closure.as_ref().unchecked_ref(),
+                    1_000,
                 );
-
-                let opts = js_sys::Object::new();
-                js_sys::Reflect::set(
-                    &opts,
-                    &"icon".into(),
-                    &JsValue::from(html_icon(&html, "drone-div-icon", 34.0)),
-                )
-                .ok();
-
-                let marker = create_marker(&lat_lng(ROUTE[0].0, ROUTE[0].1), &opts.into());
-                marker.bind_popup(&format!(
-                    "<div style='font-family: monospace; color: #00ff41; background: #0a0f0d; \
-                     padding: 8px; border: 1px solid #00ff41;'>\
-                     <b>{}</b><br/><span style='color:#557755;'>FUEL:</span> {:.0}%\
-                     <br/><span style='color:#557755;'>ACC:</span> {:.1}%</div>",
-                    drone.callsign, drone.fuel_pct, drone.accuracy_pct
-                ));
-                marker.marker_add_to(&map);
-                markers.push(marker);
             }
+            sync_closure.forget();
 
             // ---------------------------------------------------------------
             // Flight loop. Each drone sits CONVOY_SPACING_LEGS behind the one
@@ -345,11 +391,12 @@ pub fn MapPanel() -> impl IntoView {
             let progress = std::rc::Rc::new(std::cell::Cell::new(0.0_f64));
             let tick = {
                 let progress = progress.clone();
+                let markers = Rc::clone(&markers);
                 move || {
                     let t = progress.get() + LEGS_PER_TICK;
                     progress.set(t);
 
-                    for (i, marker) in markers.iter().enumerate() {
+                    for (i, (_callsign, marker)) in markers.borrow().iter().enumerate() {
                         let offset = t - (i as f64) * CONVOY_SPACING_LEGS;
                         if offset < 0.0 {
                             continue; // still holding at the IP
@@ -383,7 +430,7 @@ pub fn MapPanel() -> impl IntoView {
             // Runs for the life of the page; dropping it would kill the callback.
             flight.forget();
 
-            log::info!("map ready: {} drones on a {}-waypoint route", ordered.len(), ROUTE.len());
+            log::info!("map ready: airframes join as they register on a {}-waypoint route", ROUTE.len());
         }) as Box<dyn FnOnce()>);
 
         let window = web_sys::window().unwrap();
