@@ -157,7 +157,7 @@ fn poll_live_data(state: AppState) {
 
             match services::fetch_drones(convoy_id).await {
                 Ok(drones) => {
-                    push_telemetry_point(state, &drones);
+                    push_telemetry_point(state.telemetry_series, &drones);
                     state.drones.set(drones.into_iter().map(|d| (d.drone_id, d)).collect());
                 }
                 Err(err) => log::warn!("drones poll failed: {err}"),
@@ -202,9 +202,14 @@ fn poll_live_data(state: AppState) {
 
 /// Append one convoy-average sample to the rolling telemetry series.
 ///
+/// Takes the signal rather than `AppState`: `RwSignal` is `Copy`, so the
+/// poll closure captures a copy per Rust 2021 disjoint-field capture and
+/// stays `Fn` — passing the whole (non-Copy) state would move it out and
+/// demote the closure to `FnOnce`.
+///
 /// Averages across airborne assets keep the chart meaningful as drones join
 /// and leave; the cap keeps it a sliding window rather than a full history.
-fn push_telemetry_point(state: AppState, drones: &[DroneState]) {
+fn push_telemetry_point(series_signal: RwSignal<Vec<TelemetryPoint>>, drones: &[DroneState]) {
     if drones.is_empty() {
         return;
     }
@@ -213,7 +218,7 @@ fn push_telemetry_point(state: AppState, drones: &[DroneState]) {
     let avg_fuel_pct = drones.iter().map(|d| f64::from(d.fuel_pct)).sum::<f64>() / n;
     let label = Utc::now().format("%H:%M:%S").to_string();
 
-    state.telemetry_series.update(|series| {
+    series_signal.update(|series| {
         series.push(TelemetryPoint {
             label,
             avg_altitude_m,

@@ -314,7 +314,9 @@ pub fn MapPanel() -> impl IntoView {
 
             let sync = {
                 let markers = Rc::clone(&markers);
-                let map = map.clone();
+                // `map` is captured by move: wasm_bindgen extern types have no
+                // own Clone (a .clone() derefs to JsValue and loses the type),
+                // and nothing after this closure uses the map handle.
                 move || {
                     let drones = state.drones.get_untracked();
                     let mut ordered: Vec<_> = drones.values().cloned().collect();

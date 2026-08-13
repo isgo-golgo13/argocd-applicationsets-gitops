@@ -2,7 +2,7 @@
 //!
 //! GraphQL subscription client for real-time updates.
 
-use crate::state::{use_app_state, EngagementEvent, LeaderboardEntry};
+use crate::state::{use_app_state, EngagementEvent};
 use chrono::Utc;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
