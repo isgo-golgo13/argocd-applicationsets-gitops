@@ -7,10 +7,9 @@ crossplane:
     requests:
       cpu: 200m
       memory: 256Mi
-  provider:
-    packages:
-      - gcp
-      - kubernetes
+  # Provider installation moved to Provider CRs in templates/providers.yaml.
+  # values-level provider.packages is the pre-1.15 path and the monolithic
+  # cloud providers have since split into per-service families.
   metrics:
     enabled: true
   rbacManager:

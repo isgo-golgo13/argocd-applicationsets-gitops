@@ -131,7 +131,7 @@ pub fn ConvoyStatsPanel() -> impl IntoView {
         let leaderboard = state.leaderboard.get();
 
         let total = drones.len();
-        let airborne = drones.values().filter(|d| d.status.status_class() == "nominal").count();
+        let airborne = drones.values().filter(|d| d.status.is_airborne()).count();
         let avg_fuel: f32 = if total > 0 {
             drones.values().map(|d| d.fuel_pct).sum::<f32>() / total as f32
         } else {

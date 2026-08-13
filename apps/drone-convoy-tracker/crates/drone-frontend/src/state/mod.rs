@@ -119,6 +119,17 @@ impl DroneStatus {
             Self::Landed | Self::Maintenance => "offline",
         }
     }
+
+    /// Whether the airframe is in the air. Distinct from `status_class`:
+    /// RTB is warning-TIER for display, but a drone flying home is still
+    /// airborne — counting only "nominal" statuses made the stats panel
+    /// read "0/4 airborne" during the RTB phase while four drones flew.
+    pub fn is_airborne(&self) -> bool {
+        matches!(
+            self,
+            Self::Airborne | Self::Loiter | Self::Ingress | Self::Egress | Self::Rtb
+        )
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

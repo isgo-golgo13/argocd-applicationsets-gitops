@@ -4,5 +4,5 @@ description: Goldilocks VPA recommendations for EQL clusters
 version: 1.0.0
 dependencies:
   - name: goldilocks
-    version: 6.7.0
+    version: 9.0.2
     repository: https://charts.fairwinds.com/stable

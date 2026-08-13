@@ -1,46 +1,65 @@
+route:
+  enabled: true
+  # CHANGE ME at fork time, together with repo.url in app-sets/values.yaml
+  # and projects.sourceRepos in ../../values.yaml.
+  host: argocd.prod.CHANGEME.example.com
+
 argo-cd:
   global:
-    domain: argocd.prod.eql.cloud
-  
+    domain: argocd.prod.CHANGEME.example.com
+
   redis-ha:
     enabled: true
-    
+
   controller:
     replicas: 2
-    
+
   server:
     replicas: 2
-    ingress:
-      enabled: true
-      ingressClassName: nginx
-      annotations:
-        cert-manager.io/cluster-issuer: letsencrypt-prod
-      hosts:
-        - argocd.prod.eql.cloud
-      tls:
-        - secretName: argocd-server-tls
-          hosts:
-            - argocd.prod.eql.cloud
-    
-    config:
-      url: https://argocd.prod.eql.cloud
-      dex.config: |
-        connectors:
-          - type: github
-            id: github
-            name: GitHub
-            config:
-              clientID: $github_oauth_client_id
-              clientSecret: $github_oauth_client_secret
-              orgs:
-                - name: eql-org
+    # No Ingress block: routing is Gateway API (templates/route.yaml in this
+    # wrapper), matching the cluster-apps decision. An ingressClassName here
+    # would point at a controller this repo never installs.
+
+  # configs.cm / configs.rbac are the current argo-helm value paths;
+  # server.config and server.rbacConfig were removed in the chart's 6.x-7.x
+  # transition and are silently ignored by 8.x -- a migration that LOOKS
+  # configured and does nothing.
+  configs:
+    cm:
+      url: https://argocd.prod.CHANGEME.example.com
+      # IdP connector: COMMENTED example. A reference must not hardcode
+      # anyone's identity provider. Uncomment and fill at fork time.
+      # dex.config: |
+      #   connectors:
+      #     - type: github
+      #       id: github
+      #       name: GitHub
+      #       config:
+      #         clientID: $github_oauth_client_id
+      #         clientSecret: $github_oauth_client_secret
+      #         orgs:
+      #           - name: CHANGEME-ORG
+
+    # RBAC boundary that motivates the two AppProjects: platform owns addons,
+    # app teams own apps, everyone else reads. Group names map to IdP groups.
+    # Managed here through the subchart -- do NOT also hand-roll an
+    # argocd-rbac-cm in wrapper templates or two resources fight for one name.
+    rbac:
+      policy.default: role:readonly
+      policy.csv: |
+        p, role:platform-admin, applications, *, cluster-addons/*, allow
+        p, role:platform-admin, projects, get, cluster-addons, allow
+        p, role:app-team, applications, *, cluster-apps/*, allow
+        p, role:app-team, projects, get, cluster-apps, allow
+        g, CHANGEME-ORG:platform, role:platform-admin
+        g, CHANGEME-ORG:app-teams, role:app-team
 
   dex:
     enabled: true
-    
+
   repoServer:
     replicas: 2
-    
+
   applicationSet:
     enabled: true
     replicas: 2

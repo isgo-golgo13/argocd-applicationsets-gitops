@@ -73,7 +73,7 @@ addonWaves:
       - keda
       - scylla-operator
 
-# external-dns, argocd, goldilocks, kargo, vault, cast-ai and anything added
+# external-dns, argocd, goldilocks, kargo, vault and anything added
 # later land here via the catch-all glob -- none of them provide CRDs that
 # another addon consumes, so none needs an explicit wave. external-dns is the
 # worked example: it was added with no edit to this file.

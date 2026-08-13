@@ -1,0 +1,32 @@
+{{- /*
+HTTPRoute for the ArgoCD UI/API, parented to the shared platform Gateway.
+Replaces the nginx Ingress this repo used to carry: Gateway API is the routing
+decision here (Cilium Gateway + HTTPRoute in cluster-apps), and an
+ingressClassName pointing at a controller this repo never installs is a
+contradiction a careful reader catches immediately.
+
+TLS terminates at the Gateway listener; cert-manager issues the listener
+certificate (ExperimentalGatewayAPISupport feature gate, see the cert-manager
+prod values). The route itself is therefore plain HTTP to the backend.
+*/ -}}
+{{- if .Values.route.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  parentRefs:
+    - name: {{ .Values.route.gateway.name }}
+      namespace: {{ .Values.route.gateway.namespace }}
+  hostnames:
+    - {{ .Values.route.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: argocd-server
+          port: 80
+{{- end }}

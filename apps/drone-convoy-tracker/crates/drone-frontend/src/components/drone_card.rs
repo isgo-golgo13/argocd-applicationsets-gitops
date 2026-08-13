@@ -27,7 +27,7 @@ pub fn DroneListPanel() -> impl IntoView {
     };
 
     let total = move || drones().len();
-    let airborne = move || drones().iter().filter(|d| d.status.status_class() == "nominal").count();
+    let airborne = move || drones().iter().filter(|d| d.status.is_airborne()).count();
 
     view! {
         <div class="panel">

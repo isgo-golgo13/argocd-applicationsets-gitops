@@ -4,5 +4,5 @@ description: ArgoCD chart configuration for EQL
 version: 1.0.0
 dependencies:
   - name: argo-cd
-    version: 5.46.7
+    version: 8.1.2
     repository: https://argoproj.github.io/argo-helm

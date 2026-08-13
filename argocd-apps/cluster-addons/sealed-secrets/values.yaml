@@ -1,0 +1,16 @@
+# ---------------------------------------------------------------------------
+# cluster-addons/sealed-secrets/values.yaml -- COMMON base for all environments.
+#
+# SCOPE -- read this before adding a SealedSecret anywhere in this repo.
+#
+# The secrets story has one primary: Vault is the backing store, External
+# Secrets Operator syncs Vault material into cluster Secrets. sealed-secrets
+# exists for exactly one class of secret: BOOTSTRAP secrets that must be in
+# Git and applied before ESO itself is running -- in this repo that means the
+# ArgoCD cluster-registration Secrets under cluster-secrets/ (and nothing
+# else). If a secret can be delivered by ESO, it must be. Three overlapping
+# secret systems with no stated primary is the first thing a reviewer asks
+# about; this comment is the answer, restated in the root README.
+# ---------------------------------------------------------------------------
+sealed-secrets:
+  fullnameOverride: sealed-secrets-controller

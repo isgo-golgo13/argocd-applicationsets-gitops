@@ -1,24 +1,10 @@
+route:
+  enabled: true
+  host: goldilocks.prod.CHANGEME.example.com
+
 goldilocks:
-  replicaCount: 2
-  dashboard:
-    replicaCount: 2
-    service:
-      type: ClusterIP
-    ingress:
-      enabled: true
-      className: nginx
-      annotations:
-        cert-manager.io/cluster-issuer: letsencrypt-prod
-      hosts:
-        - host: goldilocks.prod.eql.cloud
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - secretName: goldilocks-tls
-          hosts:
-            - goldilocks.prod.eql.cloud
   controller:
+    replicaCount: 2
     resources:
       limits:
         cpu: 200m
@@ -26,7 +12,15 @@ goldilocks:
       requests:
         cpu: 100m
         memory: 128Mi
+
+  # Single dashboard key: the previous file declared `dashboard:` twice, and
+  # YAML last-key-wins silently discarded the first block (which held the
+  # Ingress config -- dead twice over, since it also pointed at an nginx
+  # controller this repo never installs). Routing is templates/route.yaml.
   dashboard:
+    replicaCount: 2
+    service:
+      type: ClusterIP
     resources:
       limits:
         cpu: 200m

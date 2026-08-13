@@ -4,5 +4,5 @@ description: KEDA scaling for EQL workloads
 version: 1.0.0
 dependencies:
   - name: keda
-    version: 2.12.0
+    version: 2.16.1
     repository: https://kedacore.github.io/charts

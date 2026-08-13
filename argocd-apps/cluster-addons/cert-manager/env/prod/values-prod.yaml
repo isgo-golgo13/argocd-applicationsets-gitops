@@ -70,14 +70,18 @@ cert-manager:
   extraArgs:
     - --dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53
     - --enable-certificate-owner-ref=true
-    - --feature-gates=AdditionalCertificateOutputFormats=true
+    # ExperimentalGatewayAPISupport: issue certificates from Gateway
+    # listeners[].tls -- without it the Gateway migration has no cert path.
+    - --feature-gates=AdditionalCertificateOutputFormats=true,ExperimentalGatewayAPISupport=true
 
   nodeSelector:
     kubernetes.io/os: linux
 
   tolerations:
+    # node-role.kubernetes.io/master was removed in Kubernetes 1.25;
+    # control-plane is the surviving taint key.
     - effect: NoSchedule
-      key: node-role.kubernetes.io/master
+      key: node-role.kubernetes.io/control-plane
       operator: Exists
 
   affinity:

@@ -4,5 +4,5 @@ description: Kargo for EQL GitOps Promotion
 version: 1.0.0
 dependencies:
   - name: kargo
-    version: 0.3.0
+    version: 1.2.1
     repository: https://akuity.github.io/kargo

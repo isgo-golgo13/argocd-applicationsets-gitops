@@ -4,5 +4,5 @@ description: External Secrets Operator for EQL
 version: 1.0.0
 dependencies:
   - name: external-secrets
-    version: 0.9.9
+    version: 0.14.4
     repository: https://charts.external-secrets.io

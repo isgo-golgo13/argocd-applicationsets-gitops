@@ -21,3 +21,14 @@ argo-cd:
     # cluster-addons loses its create-update deletion protection silently.
     extraArgs:
       - --enable-policy-override
+
+# Shared platform Gateway that every addon HTTPRoute parents to. Environments
+# enable the route and set the host in their overlay; the Gateway itself is
+# owned by the platform (listener TLS issued by cert-manager via the
+# ExperimentalGatewayAPISupport feature gate).
+route:
+  enabled: false
+  host: ""
+  gateway:
+    name: platform-gateway
+    namespace: gateway-system

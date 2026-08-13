@@ -22,8 +22,12 @@ pub fn Header() -> impl IntoView {
     });
 
     let mission_elapsed = move || {
+        // Derived from the ticking `time` signal, not Utc::now(): mission_start
+        // is set once and never changes, so a closure depending on it alone
+        // renders once and freezes at 00:00:00. Reading `time` re-runs this
+        // every second alongside the ZULU clock.
         state.mission_start.get().map(|start| {
-            let duration = Utc::now() - start;
+            let duration = time.get() - start;
             let hours = duration.num_hours();
             let minutes = duration.num_minutes() % 60;
             let seconds = duration.num_seconds() % 60;

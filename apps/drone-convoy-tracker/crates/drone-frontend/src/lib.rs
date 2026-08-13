@@ -214,8 +214,11 @@ fn push_telemetry_point(series_signal: RwSignal<Vec<TelemetryPoint>>, drones: &[
         return;
     }
     let n = drones.len() as f64;
-    let avg_altitude_m = drones.iter().map(|d| d.position.altitude_m).sum::<f64>() / n;
-    let avg_fuel_pct = drones.iter().map(|d| f64::from(d.fuel_pct)).sum::<f64>() / n;
+    // Rounded to one decimal at the source: raw f64 averages leak float dust
+    // ("100.00000000046748") into the chart tooltip. Rounding the data fixes
+    // the tooltip AND the axis without touching the chart library's formatter.
+    let avg_altitude_m = ((drones.iter().map(|d| d.position.altitude_m).sum::<f64>() / n) * 10.0).round() / 10.0;
+    let avg_fuel_pct = ((drones.iter().map(|d| f64::from(d.fuel_pct)).sum::<f64>() / n) * 10.0).round() / 10.0;
     let label = Utc::now().format("%H:%M:%S").to_string();
 
     series_signal.update(|series| {
