@@ -21,7 +21,11 @@ pub fn EngagementFeedPanel() -> impl IntoView {
                 <span class="panel-title">"ENGAGEMENT FEED"</span>
                 <span class="panel-badge">{hit_count}"/"{ total_count}</span>
             </div>
-            <div class="panel-body no-padding">
+            // overflow-y:hidden — .panel-body scrolls by default, and
+            // .engagement-feed below has its own max-height scroller. Both
+            // painting thumbs is the "double vertical slider". The feed list
+            // is the ONLY scroller in this panel.
+            <div class="panel-body no-padding" style="overflow-y: hidden;">
                 <div class="engagement-feed">
                     <For
                         each=events

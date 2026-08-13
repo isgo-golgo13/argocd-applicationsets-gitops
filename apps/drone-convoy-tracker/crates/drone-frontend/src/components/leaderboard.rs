@@ -6,6 +6,11 @@ use leptos::prelude::*;
 
 use crate::state::{use_app_state, LeaderboardEntry};
 
+/// Streak marker: a target roundel with crosshair ticks, stroke-only in
+/// currentColor so it themes with the row. Replaces the fire emoji, which
+/// rendered as an unthemeable full-color glyph.
+const TARGET_SVG: &str = r##"<svg viewBox="0 0 12 12" width="12" height="12" xmlns="http://www.w3.org/2000/svg" aria-label="hit streak"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="6" cy="6" r="1.4" fill="currentColor"/><line x1="6" y1="0.2" x2="6" y2="2.4" stroke="currentColor" stroke-width="1.1"/><line x1="6" y1="9.6" x2="6" y2="11.8" stroke="currentColor" stroke-width="1.1"/><line x1="0.2" y1="6" x2="2.4" y2="6" stroke="currentColor" stroke-width="1.1"/><line x1="9.6" y1="6" x2="11.8" y2="6" stroke="currentColor" stroke-width="1.1"/></svg>"##;
+
 /// Leaderboard panel component
 #[component]
 pub fn LeaderboardPanel() -> impl IntoView {
@@ -34,7 +39,19 @@ pub fn LeaderboardPanel() -> impl IntoView {
                     })}
                     <For
                         each=entries
-                        key=|entry| entry.drone_id
+                        // Composite key: keyed by drone_id alone, each row's
+                        // view froze at first render (the "UI leaderboard
+                        // doesn't match the simulator's final tally" report).
+                        // Any change to the shot record, streak or rank mints
+                        // a new key and re-renders the row; accuracy is
+                        // derived from hits/total so it's covered.
+                        key=|entry| (
+                            entry.drone_id,
+                            entry.total_engagements,
+                            entry.successful_hits,
+                            entry.current_streak,
+                            entry.rank,
+                        )
                         children=move |entry| view! { <LeaderboardRow entry=entry /> }
                     />
                 </div>
@@ -96,7 +113,13 @@ fn LeaderboardRow(entry: LeaderboardEntry) -> impl IntoView {
                     {format!("{:.1}%", entry.accuracy_pct)}
                 </div>
                 <div class="leaderboard-record">
-                    {entry.successful_hits}"/"{ entry.total_engagements}" • 🔥"{entry.current_streak}
+                    {entry.successful_hits}"/"{ entry.total_engagements}
+                    " • "
+                    <span
+                        style="display:inline-block; vertical-align:-1px; color: var(--accent-primary);"
+                        inner_html=TARGET_SVG
+                    ></span>
+                    {entry.current_streak}
                 </div>
             </div>
         </div>

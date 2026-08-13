@@ -200,6 +200,10 @@ body {
     width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
     background: var(--bg-tertiary); border-radius: var(--radius-md); color: var(--accent-primary);
 }
+/* The shared airframe SVG carries width/height="64" as standalone-file
+   defaults; this rule scales it into the card icon box, exactly as
+   .drone-air-marker svg does for the map markers. */
+.drone-icon svg { display: block; width: 30px; height: 30px; }
 
 .drone-details { display: flex; flex-direction: column; gap: var(--space-xs); }
 .drone-callsign { font-size: 1rem; font-weight: 700; color: var(--text-primary); }

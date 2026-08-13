@@ -6,6 +6,14 @@ use leptos::prelude::*;
 
 use crate::state::{use_app_state, DroneState};
 
+/// Same airframe SVG the map flies, compiled in — one asset, every surface.
+const DRONE_SVG: &str = include_str!("../../../../assets/images/drone.svg");
+
+/// Strip the XML prolog: valid in a standalone file, invalid inside innerHTML.
+fn inline_svg(svg: &str) -> &str {
+    svg.find("<svg").map_or(svg, |i| &svg[i..])
+}
+
 /// Drone list panel
 #[component]
 pub fn DroneListPanel() -> impl IntoView {
@@ -30,7 +38,14 @@ pub fn DroneListPanel() -> impl IntoView {
             <div class="panel-body" style="display: flex; flex-direction: column; gap: 8px;">
                 <For
                     each=drones
-                    key=|drone| drone.drone_id
+                    // Key includes updated_at: Leptos <For> keeps a row's
+                    // originally-rendered view for as long as its key exists,
+                    // and DroneCard reads a plain value. Keyed by id alone,
+                    // every card froze at its first-render FUEL/ACC/WP while
+                    // state (and CONVOY STATUS's averages) moved on. The
+                    // server bumps updated_at on every upsert, so a changed
+                    // row gets a new key and a fresh render.
+                    key=|drone| (drone.drone_id, drone.updated_at)
                     children=move |drone| view! { <DroneCard drone=drone /> }
                 />
             </div>
@@ -65,12 +80,14 @@ pub fn DroneCard(drone: DroneState) -> impl IntoView {
 
     let progress_pct = (drone.current_waypoint as f32 / drone.total_waypoints as f32) * 100.0;
 
-    let platform_icon = match drone.platform_type.as_str() {
-        "MQ9_REAPER" | "MQ1C_GRAY_EAGLE" => "✈",
-        "RQ4_GLOBAL_HAWK" => "🛩",
-        "MQ25_STINGRAY" => "⚓",
-        _ => "●",
-    };
+    // One airframe silhouette for every platform, themed HUD-green via the
+    // SVG's CSS custom properties (same mechanism as the map markers, where
+    // the accent is red). Sized by the `.drone-icon svg` rule in main.css.
+    let icon_html = format!(
+        "<div style=\"--drone-accent: var(--accent-primary); \
+         --drone-edge: var(--accent-dim);\">{}</div>",
+        inline_svg(DRONE_SVG)
+    );
 
     view! {
         <div
@@ -78,9 +95,7 @@ pub fn DroneCard(drone: DroneState) -> impl IntoView {
             class:selected=is_selected
             on:click=on_click
         >
-            <div class="drone-icon">
-                <span style="font-size: 24px;">{platform_icon}</span>
-            </div>
+            <div class="drone-icon" inner_html=icon_html></div>
             <div class="drone-details">
                 <div class="drone-callsign">{drone.callsign.clone()}</div>
                 <div class="drone-tail">{drone.tail_number.clone()}</div>
