@@ -69,9 +69,9 @@ pub enum TargetType {
     Vehicle,
     Personnel,
     Structure,
-    Artillery,
+    AirDefense,
     Radar,
-    Aircraft,
+    Supply,
 }
 
 impl TargetType {
@@ -82,9 +82,9 @@ impl TargetType {
             0 => Self::Vehicle,
             1 => Self::Personnel,
             2 => Self::Structure,
-            3 => Self::Artillery,
+            3 => Self::AirDefense,
             4 => Self::Radar,
-            _ => Self::Aircraft,
+            _ => Self::Supply,
         }
     }
 
@@ -94,9 +94,9 @@ impl TargetType {
             Self::Vehicle => "VEHICLE",
             Self::Personnel => "PERSONNEL",
             Self::Structure => "STRUCTURE",
-            Self::Artillery => "ARTILLERY",
+            Self::AirDefense => "AIR_DEFENSE",
             Self::Radar => "RADAR",
-            Self::Aircraft => "AIRCRAFT",
+            Self::Supply => "SUPPLY",
         }
     }
 }

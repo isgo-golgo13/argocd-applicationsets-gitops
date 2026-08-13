@@ -398,12 +398,30 @@ body {
   to   { transform: rotate(360deg); }
 }
 
-/* Waypoint pins: light red, matching the air markers rather than Leaflet blue */
+/* Waypoint pins: teardrop map markers in light red, not Leaflet blue.
+   Three rounded corners plus one square corner, rotated 45deg, puts the point
+   at the bottom -- which is why map.rs anchors these at the bottom centre
+   rather than the middle. */
 .wp-pin {
-  width: 10px; height: 10px; border-radius: 50%;
+  position: relative;
+  width: 14px;
+  height: 14px;
   background: #ff5f5f;
-  border: 1px solid rgba(0, 0, 0, 0.65);
-  box-shadow: 0 0 6px rgba(255, 95, 95, 0.9);
+  border: 1.5px solid rgba(10, 12, 14, 0.85);
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: 0 0 7px rgba(255, 95, 95, 0.85);
+}
+
+/* Inner dot, the way Google's pins carry a hole */
+.wp-pin::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 5px; height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: rgba(10, 12, 14, 0.8);
 }
 
 @media (prefers-reduced-motion: reduce) {

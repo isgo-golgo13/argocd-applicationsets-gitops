@@ -93,8 +93,14 @@ fn lat_lng(lat: f64, lng: f64) -> JsValue {
     arr.into()
 }
 
-/// A divIcon carrying arbitrary HTML at a given square size.
+/// A divIcon carrying arbitrary HTML at a given square size, anchored at its
+/// centre. Use `html_icon_at` for markers that hang from a point.
 fn html_icon(html: &str, class: &str, size: f64) -> DivIcon {
+    html_icon_at(html, class, size, size / 2.0, size / 2.0)
+}
+
+/// As `html_icon`, with an explicit anchor within the icon box.
+fn html_icon_at(html: &str, class: &str, size: f64, anchor_x: f64, anchor_y: f64) -> DivIcon {
     let opts = js_sys::Object::new();
     js_sys::Reflect::set(&opts, &"html".into(), &html.into()).ok();
     js_sys::Reflect::set(&opts, &"className".into(), &class.into()).ok();
@@ -103,8 +109,8 @@ fn html_icon(html: &str, class: &str, size: f64) -> DivIcon {
     dims.push(&JsValue::from_f64(size));
     js_sys::Reflect::set(&opts, &"iconSize".into(), &dims.into()).ok();
     let anchor = js_sys::Array::new();
-    anchor.push(&JsValue::from_f64(size / 2.0));
-    anchor.push(&JsValue::from_f64(size / 2.0));
+    anchor.push(&JsValue::from_f64(anchor_x));
+    anchor.push(&JsValue::from_f64(anchor_y));
     js_sys::Reflect::set(&opts, &"iconAnchor".into(), &anchor.into()).ok();
     div_icon(&opts.into())
 }
@@ -276,10 +282,14 @@ pub fn MapPanel() -> impl IntoView {
                 js_sys::Reflect::set(
                     &pin_opts,
                     &"icon".into(),
-                    &JsValue::from(html_icon(
+                    // Anchored at the bottom tip so the point sits on the
+                    // waypoint, not the centre of the teardrop.
+                    &JsValue::from(html_icon_at(
                         "<div class=\"wp-pin\"></div>",
                         "waypoint-div-icon",
-                        10.0,
+                        16.0,
+                        8.0,
+                        16.0,
                     )),
                 )
                 .ok();

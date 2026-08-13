@@ -175,8 +175,26 @@ async fn post_engagement(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        warn!("API returned status: {}", response.status());
+    // GraphQL reports errors in a 200 OK body. Checking only the HTTP status
+    // means every rejected mutation looks like a success and the leaderboard
+    // stays silently empty -- which is exactly what happened.
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+
+    if !status.is_success() {
+        warn!("API returned status {status}: {body}");
+        return Ok(());
+    }
+
+    if let Some(errors) = body.get("errors").and_then(|e| e.as_array()) {
+        for err in errors {
+            let message = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown GraphQL error");
+            warn!("recordEngagement rejected: {message}");
+        }
+        return Ok(());
     }
 
     Ok(())
