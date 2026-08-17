@@ -19,6 +19,23 @@ pub struct AppState {
     /// Rolling convoy-average telemetry, one point per poll tick. The chart
     /// reads this reactively; `lib.rs` appends and caps it.
     pub telemetry_series: RwSignal<Vec<TelemetryPoint>>,
+    /// Which tactical theater the map shows. Written by the header's mission
+    /// selector, read by `map.rs`. Default Afghanistan (Kandahar).
+    pub selected_theater: RwSignal<crate::components::regions::TheaterId>,
+    /// Smoothed live position per drone for the GPS readout: the map's flight
+    /// loop interpolates between the last two SERVER fixes (from the 2 s
+    /// poll) at animation rate and writes here. Truth is re-anchored on every
+    /// poll; the display glides between fixes — exactly what a real GPS/INS
+    /// display does. Never invented: with a single fix it holds that fix.
+    pub live_positions: RwSignal<HashMap<Uuid, LivePosition>>,
+    /// A tasking order is in flight: the selector chose this theater and the
+    /// convoy record has been (or is being) updated, but the airframes have
+    /// not yet reported from there. Cleared by the map when the server's
+    /// positions arrive in the new theater. Drives the RETASKING indicator.
+    pub retasking: RwSignal<Option<crate::components::regions::TheaterId>>,
+    /// Last tasking order the API rejected (message), shown on the HUD card
+    /// so a failure is never silent. Cleared on the next order.
+    pub retask_error: RwSignal<Option<String>>,
     pub ws_connected: RwSignal<bool>,
     pub mission_start: RwSignal<Option<DateTime<Utc>>>,
     pub alerts: RwSignal<Vec<Alert>>,
@@ -33,11 +50,24 @@ impl AppState {
             drones: RwSignal::new(HashMap::new()),
             engagements: RwSignal::new(Vec::new()),
             telemetry_series: RwSignal::new(Vec::new()),
+            selected_theater: RwSignal::new(crate::components::regions::TheaterId::default()),
+            live_positions: RwSignal::new(HashMap::new()),
+            retasking: RwSignal::new(None),
+            retask_error: RwSignal::new(None),
             ws_connected: RwSignal::new(false),
             mission_start: RwSignal::new(None),
             alerts: RwSignal::new(Vec::new()),
         }
     }
+}
+
+/// A drone's smoothed live fix for the GPS readout (see `AppState::live_positions`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LivePosition {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub altitude_m: f64,
+    pub heading_deg: f32,
 }
 
 /// One convoy-average telemetry sample for the flight telemetry chart.

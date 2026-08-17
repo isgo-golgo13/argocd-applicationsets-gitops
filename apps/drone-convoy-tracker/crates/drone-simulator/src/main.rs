@@ -40,9 +40,39 @@ struct Args {
     #[arg(short, long, default_value = "4")]
     drones: usize,
 
-    /// API endpoint
-    #[arg(long, default_value = "http://localhost:8080/graphql")]
+    /// Tactical theater to fly (also DRONE_THEATER): afghanistan | syria |
+    /// libya | pakistan | iran | iraq. The convoy follows that theater's
+    /// published route — the same points the dashboard draws as pins — so
+    /// posted positions land exactly on the track. Default: afghanistan.
+    #[arg(long, env = "DRONE_THEATER", default_value = "afghanistan")]
+    theater: String,
+
+    /// API endpoint (also DRONE_API_URL). Point it at the Gateway when the
+    /// stack runs in Kubernetes: https://drone.localtest.me/graphql
+    #[arg(long, env = "DRONE_API_URL", default_value = "http://localhost:8080/graphql")]
     api_url: String,
+
+    /// Run as a long-lived SERVICE (also DRONE_SERVICE=1): fly sorties back to
+    /// back and obey tasking orders from the dashboard. Each sortie the
+    /// convoy record's aor_name is read; if the dashboard retasked it (the
+    /// THEATER selector -> retaskConvoy mutation), the NEXT sortie flies the
+    /// new theater. Without this flag: one sortie in --theater, then exit
+    /// (the original behavior, kept for dev).
+    #[arg(long, env = "DRONE_SERVICE", default_value_t = false,
+          value_parser = parse_bool_env, num_args = 0..=1, default_missing_value = "true")]
+    service: bool,
+
+    /// In service mode, how often (ticks) to check the tasking order MID-
+    /// sortie. A change mid-sortie retasks immediately (the convoy is
+    /// re-flown from the new theater's IP) rather than waiting for the end.
+    #[arg(long, env = "DRONE_TASKING_POLL_TICKS", default_value = "3")]
+    tasking_poll_ticks: u32,
+
+    /// Accept self-signed TLS (also DRONE_INSECURE_TLS=1). For KinD, where the
+    /// Gateway certificate comes from a self-signed ClusterIssuer. Never in prod.
+    #[arg(long, env = "DRONE_INSECURE_TLS", default_value_t = false,
+          value_parser = parse_bool_env, num_args = 0..=1, default_missing_value = "true")]
+    insecure_tls: bool,
 
     /// Tick interval in milliseconds
     #[arg(long, default_value = "1000")]
@@ -71,29 +101,103 @@ async fn main() -> Result<()> {
         args.callsign, args.drones, args.mission
     );
 
-    let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones);
-    let client = Client::new();
-    let progress_per_tick = 1.0 / args.duration as f64;
-
-    info!("Convoy ID: {}", convoy.convoy_id);
+    let requested = drone_domain::TheaterId::from_slug(&args.theater).unwrap_or_else(|| {
+        let valid: Vec<&str> = drone_domain::TheaterId::ALL.iter().map(|t| t.slug()).collect();
+        warn!("unknown theater '{}' — valid: {} — flying afghanistan", args.theater, valid.join(", "));
+        drone_domain::TheaterId::Afghanistan
+    });
+    let client = Client::builder()
+        .danger_accept_invalid_certs(args.insecure_tls)
+        .build()
+        .expect("reqwest client");
+    if args.insecure_tls {
+        warn!("TLS certificate verification DISABLED (--insecure-tls) -- local KinD only");
+    }
     info!("API: {}", args.api_url);
-    info!("Tick: {}ms, Duration: {} ticks", args.tick_ms, args.duration);
+    info!("Tick: {}ms, Duration: {} ticks, Mode: {}", args.tick_ms, args.duration,
+          if args.service { "SERVICE (obeys dashboard tasking)" } else { "single sortie" });
 
-    // -------------------------------------------------------------------------
-    // BOOTSTRAP — register convoy, routes and drones before the first tick,
-    // so the dashboard has real rows to render from second one.
-    //
-    // The API is polled to readiness first: `make serve` compiles the API in
-    // release while trunk builds the frontend, so for the first minute or two
-    // the port may not be listening. Bootstrap is one-shot — firing it into
-    // that window loses the convoy and every drone's identity silently, and
-    // the dashboard then shows four UNKNOWNs collapsed onto one map marker.
-    // -------------------------------------------------------------------------
     if !args.dry_run {
         wait_for_api(&client, &args.api_url).await;
-        bootstrap(&client, &args, &convoy).await;
     }
 
+    // Initial theater: SEED from --theater/DRONE_THEATER, deliberately NOT
+    // from a stale record. A record left over from a previous run is not a
+    // live order -- the operator's opening dashboard view is, and it issues
+    // that order (retaskConvoy) as soon as it loads. Starting where the
+    // dashboard defaults means the two agree on boot; any disagreement is
+    // reconciled by that first order within a few ticks. Live tasking is
+    // still read from the record from the first sortie onward.
+    let mut theater = requested;
+
+    loop {
+        // Boot rule: the FIRST sortie seeds from --theater and ignores whatever
+        // the record says -- a record left by yesterday's run is not a live
+        // order. The dashboard's opening view IS a live order: it is issued on
+        // page load and re-issued the moment drones appear, and the mid-sortie
+        // tasking poll picks it up within a few ticks. So on boot the two
+        // agree by default (both Afghanistan) and any disagreement heals in
+        // seconds -- without a stale record ever winning. From the second
+        // sortie on, the record is authoritative between sorties as before.
+        info!("Theater: {} ({} waypoints)", theater.theater().label, theater.theater().route.len());
+        let mut convoy = ConvoySimulator::new(&args.callsign, &args.mission, args.drones, theater);
+        info!("Convoy ID: {}", convoy.convoy_id);
+
+        if !args.dry_run {
+            bootstrap(&client, &args, &convoy).await;
+        }
+
+        // Immediately after bootstrap, catch an order the dashboard issued
+        // while we were starting up (its opening view). Zero-tick latency for
+        // the common "make serve, open dashboard" flow.
+        if args.service && !args.dry_run {
+            if let Some(t) = read_tasking(&client, &args.api_url, convoy.convoy_id).await {
+                if t != theater {
+                    info!("Order on record at bootstrap: {} -> {} — re-flying", theater.theater().label, t.theater().label);
+                    theater = t;
+                    continue;
+                }
+            }
+        }
+
+        let outcome = fly_sortie(&client, &args, &mut convoy).await;
+
+        match outcome {
+            SortieOutcome::Complete => {
+                if !args.service { break; }
+                // Between sorties: obey whatever the dashboard ordered.
+                if !args.dry_run {
+                    if let Some(t) = read_tasking(&client, &args.api_url, convoy.convoy_id).await {
+                        if t != theater { info!("RETASKED for next sortie: {} -> {}", theater.theater().label, t.theater().label); }
+                        theater = t;
+                    }
+                }
+                info!("Sortie complete — next sortie in {} theater", theater.theater().label);
+                sleep(Duration::from_secs(2)).await;
+            }
+            SortieOutcome::Retasked(t) => {
+                info!("RETASKED mid-sortie: {} -> {} — re-flying from the new IP", theater.theater().label, t.theater().label);
+                theater = t;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// How a sortie ended.
+enum SortieOutcome {
+    /// Flew to 100% (or single-sortie mode finished).
+    Complete,
+    /// The dashboard retasked the convoy mid-sortie; carries the new theater.
+    Retasked(drone_domain::TheaterId),
+}
+
+/// Fly one sortie to completion, or until a tasking change is observed
+/// (service mode). All per-tick posting lives here — unchanged from the
+/// original mission loop, just factored so it can run repeatedly.
+async fn fly_sortie(client: &Client, args: &Args, convoy: &mut ConvoySimulator) -> SortieOutcome {
+    let progress_per_tick = 1.0 / args.duration as f64;
     let mut last_status = convoy.status;
 
     for tick in 0..args.duration {
@@ -103,7 +207,7 @@ async fn main() -> Result<()> {
 
         // Convoy status transitions (Active -> Rtb -> Complete)
         if !args.dry_run && state.status != last_status {
-            post_convoy_status(&client, &args.api_url, &convoy, state.status).await;
+            post_convoy_status(client, &args.api_url, convoy, state.status).await;
             last_status = state.status;
         }
 
@@ -121,8 +225,8 @@ async fn main() -> Result<()> {
 
         if !args.dry_run {
             for snap in &telemetry {
-                post_telemetry(&client, &args.api_url, snap).await;
-                post_drone_state(&client, &args.api_url, &convoy, snap, state.progress_pct).await;
+                post_telemetry(client, &args.api_url, snap).await;
+                post_drone_state(client, &args.api_url, convoy, snap, state.progress_pct).await;
             }
         }
 
@@ -136,7 +240,7 @@ async fn main() -> Result<()> {
             );
 
             if !args.dry_run {
-                post_engagement(&client, &args.api_url, e).await;
+                post_engagement(client, &args.api_url, e).await;
             }
         }
 
@@ -153,13 +257,24 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Service mode: obey a mid-sortie tasking change promptly.
+        if args.service && !args.dry_run && args.tasking_poll_ticks > 0
+            && tick % args.tasking_poll_ticks == 0
+        {
+            if let Some(t) = read_tasking(client, &args.api_url, convoy.convoy_id).await {
+                if t != convoy.theater {
+                    return SortieOutcome::Retasked(t);
+                }
+            }
+        }
+
         sleep(Duration::from_millis(args.tick_ms)).await;
     }
 
     info!("Mission complete!");
 
     if !args.dry_run {
-        post_convoy_status(&client, &args.api_url, &convoy, ConvoyStatus::Complete).await;
+        post_convoy_status(client, &args.api_url, convoy, ConvoyStatus::Complete).await;
     }
 
     // Final leaderboard
@@ -177,7 +292,34 @@ async fn main() -> Result<()> {
         );
     }
 
-    Ok(())
+    SortieOutcome::Complete
+}
+
+/// Read the tasking order: the convoy record's `aorName`, parsed as a theater
+/// slug. `None` if the convoy doesn't exist yet or the name isn't a known
+/// theater (e.g. the legacy "Kandahar Province"), in which case the caller
+/// keeps flying what it has. This is the ONLY input the dashboard has on the
+/// simulator -- and it's the same input a live ground station would read.
+async fn read_tasking(client: &Client, api_url: &str, convoy_id: uuid::Uuid) -> Option<drone_domain::TheaterId> {
+    let body = json!({
+        "query": "query Tasking($id: ID!) { convoy(convoyId: $id) { aorName } }",
+        "variables": { "id": convoy_id.to_string() }
+    });
+    let resp = client.post(api_url).json(&body).send().await.ok()?;
+    let v: Value = resp.json().await.ok()?;
+    let name = v.pointer("/data/convoy/aorName")?.as_str()?;
+    drone_domain::TheaterId::from_slug(name)
+}
+
+/// Lenient boolean for env-backed flags: true/false, 1/0, yes/no, on/off.
+/// clap's default bool parser accepts only "true"/"false", which is a
+/// surprising trap for `DRONE_SERVICE=1` in a Makefile or shell.
+fn parse_bool_env(s: &str) -> std::result::Result<bool, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" | "" => Ok(false),
+        other => Err(format!("expected true/false (or 1/0, yes/no, on/off), got '{other}'")),
+    }
 }
 
 // =============================================================================
@@ -230,9 +372,15 @@ async fn bootstrap(client: &Client, args: &Args, convoy: &ConvoySimulator) {
             "convoyId": convoy.convoy_id.to_string(),
             "callsign": format!("{}-CONVOY", args.callsign),
             "missionType": args.mission.to_uppercase(),
-            "aorName": "Kandahar Province",
-            "aorCenter": { "latitude": 31.6289, "longitude": 65.7372, "altitudeM": 1000.0 },
-            "aorRadiusKm": 150.0,
+            // The theater slug IS the tasking vocabulary (see read_tasking):
+            // the dashboard writes it via retaskConvoy, we read it back.
+            "aorName": convoy.theater.slug(),
+            "aorCenter": {
+                "latitude": convoy.theater.theater().center.0,
+                "longitude": convoy.theater.theater().center.1,
+                "altitudeM": 1000.0
+            },
+            "aorRadiusKm": convoy.theater.theater().aor_radius_m / 1000.0,
             "commandingUnit": "432nd Wing",
             "roeProfile": "STANDARD"
         }

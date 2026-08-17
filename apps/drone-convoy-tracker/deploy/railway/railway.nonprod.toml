@@ -1,0 +1,18 @@
+# Railway -- nonprod API. Playground on, verbose logs, single replica.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "containers/Containerfile.api"
+
+[deploy]
+startCommand = "sh -c 'SERVER_ADDR=0.0.0.0:${PORT:-8080} /usr/local/bin/drone-graphql-api'"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+numReplicas = 1
+
+[deploy.env]
+ENABLE_PLAYGROUND = "true"
+ENABLE_INTROSPECTION = "true"
+LOG_LEVEL = "info,drone_graphql_api=debug"
+SCYLLA_KEYSPACE = "drone_ops"
+CORS_ORIGINS = "*"

@@ -596,6 +596,51 @@ impl MutationRoot {
         Ok(convoy.into())
     }
 
+    /// Retask a convoy to a tactical theater.
+    ///
+    /// The tasking order the dashboard issues from its THEATER selector.
+    /// Validated against the shared theater vocabulary; written to the
+    /// convoy record (aor_name = slug, aor_center = theater centre); the
+    /// simulator -- or, later, a live ground station -- watches the record
+    /// and flies the new route. The dashboard never commands a process; it
+    /// commands the system of record.
+    #[graphql(name = "retaskConvoy")]
+    async fn retask_convoy(&self, ctx: &Context<'_>, input: RetaskConvoyInput) -> Result<Convoy> {
+        let api_ctx = ctx.data::<ApiContext>()?;
+        let convoy_uuid = Uuid::parse_str(&input.convoy_id).map_err(ApiError::from)?;
+        let theater = domain::TheaterId::from_slug(&input.theater).ok_or_else(|| {
+            let valid: Vec<&str> = domain::TheaterId::ALL.iter().map(|t| t.slug()).collect();
+            async_graphql::Error::new(format!(
+                "unknown theater '{}' (valid: {})", input.theater, valid.join(", ")
+            ))
+        })?;
+        let t = theater.theater();
+
+        tracing::info!(convoy_id = %convoy_uuid, theater = t.label, "Retasking convoy");
+
+        let center = domain::Coordinates {
+            latitude: t.center.0,
+            longitude: t.center.1,
+            altitude_m: 0.0,
+            heading_deg: 0.0,
+            speed_mps: 0.0,
+        };
+        api_ctx
+            .convoy_repo
+            .retask(convoy_uuid, theater.slug(), &center)
+            .await
+            .map_err(ApiError::from)?;
+
+        let convoy = api_ctx
+            .convoy_repo
+            .get(convoy_uuid)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| async_graphql::Error::new("Convoy not found after retask"))?;
+
+        Ok(convoy.into())
+    }
+
     // =========================================================================
     // WAYPOINT MUTATIONS
     // =========================================================================

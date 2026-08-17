@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# app-scaling.yaml -- HPA (built-in), VPA recommender, KEDA event-driven.
+# HPA and KEDA are mutually exclusive on the API: KEDA manages its own HPA.
+# ---------------------------------------------------------------------------
+{{- if and .Values.scaling.hpa.enabled (not .Values.scaling.keda.enabled) }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "drone.fullname" . }}-api
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "drone.fullname" . }}-api
+  minReplicas: {{ .Values.scaling.hpa.minReplicas }}
+  maxReplicas: {{ .Values.scaling.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.scaling.hpa.targetCPUUtilizationPercentage }} }
+{{- end }}
+{{- if .Values.scaling.vpa.enabled }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "drone.fullname" . }}-api
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "drone.fullname" . }}-api
+  updatePolicy:
+    updateMode: {{ .Values.scaling.vpa.updateMode | quote }}
+{{- end }}
+{{- if .Values.scaling.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "drone.fullname" . }}-api
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "drone.fullname" . }}-api
+  minReplicaCount: {{ .Values.scaling.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.scaling.keda.maxReplicas }}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.scaling.keda.prometheus }}
+        query: sum(rate(http_requests_total{job="{{ include "drone.fullname" . }}-api"}[1m]))
+        threshold: {{ .Values.scaling.keda.threshold | quote }}
+{{- end }}

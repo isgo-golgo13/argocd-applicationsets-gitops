@@ -12,9 +12,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-authors = ["CHANGEME-ORG"]
+authors = ["Tomas Wallick"]
 license = "MIT"
-repository = "https://github.com/CHANGEME-ORG/argocd-applicationsets-gitops"
+repository = "https://github.com/isgo-golgo13/drone-convoy-attack-tracker-leptos-rs"
 
 [workspace.dependencies]
 # Async runtime

@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------------
+# app-metrics.yaml -- Prometheus scrape config (prometheus-operator CRD).
+# ---------------------------------------------------------------------------
+{{- if .Values.metrics.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "drone.fullname" . }}-api
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "drone.selector.api" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.interval }}
+{{- end }}

@@ -1,0 +1,20 @@
+# ---------------------------------------------------------------------------
+# app-config.yaml -- non-secret runtime configuration.
+# Keys mirror drone-graphql-api/src/config.rs from_env() exactly.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "drone.fullname" . }}-config
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+data:
+  SERVER_ADDR: "0.0.0.0:{{ .Values.api.port }}"
+  ENABLE_PLAYGROUND: {{ .Values.api.enablePlayground | quote }}
+  ENABLE_INTROSPECTION: {{ .Values.api.enableIntrospection | quote }}
+  LOG_LEVEL: {{ .Values.api.logLevel | quote }}
+  SCYLLA_HOSTS: {{ include "drone.scylla.hosts" . | quote }}
+  SCYLLA_KEYSPACE: {{ .Values.scylla.keyspace | quote }}
+  REDIS_URL: {{ include "drone.redis.url" . | quote }}
+  # Same-origin serving through the Gateway: no cross-origin callers.
+  CORS_ORIGINS: "https://{{ .Values.hostname }}"

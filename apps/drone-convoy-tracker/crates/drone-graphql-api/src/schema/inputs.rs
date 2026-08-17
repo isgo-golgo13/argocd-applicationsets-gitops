@@ -187,6 +187,15 @@ pub struct UpdateConvoyStatusInput {
     pub status: ConvoyStatus,
 }
 
+/// Retask a convoy to a tactical theater (the dashboard's mission selector).
+#[derive(InputObject, Debug)]
+pub struct RetaskConvoyInput {
+    /// Convoy ID
+    pub convoy_id: String,
+    /// Theater slug: afghanistan | syria | libya | pakistan | iran | iraq
+    pub theater: String,
+}
+
 // =============================================================================
 // WAYPOINT INPUTS
 // =============================================================================

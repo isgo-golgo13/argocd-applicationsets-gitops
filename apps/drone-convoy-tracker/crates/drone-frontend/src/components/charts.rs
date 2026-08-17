@@ -3,7 +3,7 @@
 //! Real-time charts using Charming (ECharts wrapper).
 
 use charming::{
-    component::{Axis, Grid, Legend, Title},
+    component::{Axis, Grid, Legend},
     element::{AreaStyle, AxisType, LineStyle, Tooltip, Trigger},
     series::Line,
     Chart, WasmRenderer,
@@ -42,13 +42,10 @@ pub fn TelemetryChartPanel() -> impl IntoView {
         let altitude_data: Vec<f64> = series.iter().map(|p| p.avg_altitude_m).collect();
         let fuel_data: Vec<f64> = series.iter().map(|p| p.avg_fuel_pct).collect();
 
+        // No in-chart title: the panel header already reads FLIGHT TELEMETRY.
+        // Two labels for one panel looked odd, and the freed strip lets the
+        // plot breathe. Chart title stays out; grid top tightened to match.
         let chart = Chart::new()
-            .title(
-                Title::new()
-                    .text("FLIGHT TELEMETRY")
-                    .text_style(charming::element::TextStyle::new().color("#00ff41").font_size(12))
-                    .left("center"),
-            )
             .tooltip(Tooltip::new().trigger(Trigger::Axis))
             .legend(
                 Legend::new()
@@ -60,7 +57,7 @@ pub fn TelemetryChartPanel() -> impl IntoView {
                 Grid::new()
                     .left("10%")
                     .right("10%")
-                    .top("15%")
+                    .top("8%")       // title strip gone -> reclaim it for the plot
                     .bottom("20%"),
             )
             .x_axis(
@@ -109,7 +106,7 @@ pub fn TelemetryChartPanel() -> impl IntoView {
     view! {
         <div class="panel">
             <div class="panel-header">
-                <span class="panel-title">"TELEMETRY"</span>
+                <span class="panel-title">"FLIGHT TELEMETRY"</span>
                 {move || (state.telemetry_series.get().len() >= 2).then(|| view! {
                     <span class="panel-badge">"LIVE"</span>
                 })}

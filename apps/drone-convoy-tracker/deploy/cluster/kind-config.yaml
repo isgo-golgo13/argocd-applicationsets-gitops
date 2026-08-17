@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# deploy/cluster/kind-config.yaml -- 3 control-plane + 3 worker KinD cluster.
+#
+# HA control plane so the platform operators (cert-manager, ESO, KEDA,
+# scylla-operator) schedule realistically and etcd quorum survives a node
+# restart -- a laptop cluster that behaves like the real one.
+#
+# CNI: disabled. Cilium is installed by kind-bootstrap.sh and provides the
+# Gateway API implementation (gatewayAPI.enabled=true) -- there is no separate
+# ingress/gateway controller anywhere in this stack.
+#
+# ACCESS FROM THE MAC: KinD nodes run inside the container VM, so a
+# LoadBalancer IP (MetalLB or Cilium L2) would be announced on a network the
+# Mac's browser cannot reach. The reliable answer is extraPortMappings --
+# host :80/:443 forwarded straight into the first control-plane node -- and
+# the Cilium Gateway pinned to that node with a NodePort-backed Service.
+# https://drone.localtest.me then works from Safari with zero /etc/hosts.
+# ---------------------------------------------------------------------------
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: drone-ops
+networking:
+  disableDefaultCNI: true       # Cilium
+  kubeProxyMode: none           # Cilium kube-proxy replacement
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+nodes:
+  # ---- control plane x3 ----
+  - role: control-plane
+    labels:
+      ingress-ready: "true"     # the Gateway pins here (see kind-bootstrap.sh)
+    extraPortMappings:
+      - { containerPort: 30080, hostPort: 80,  protocol: TCP }
+      - { containerPort: 30443, hostPort: 443, protocol: TCP }
+  - role: control-plane
+  - role: control-plane
+  # ---- workers x3 ----
+  - role: worker
+    labels: { workload: general }
+  - role: worker
+    labels: { workload: general }
+  - role: worker
+    labels: { workload: general }

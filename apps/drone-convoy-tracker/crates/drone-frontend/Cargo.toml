@@ -53,6 +53,8 @@ web-sys = { version = "0.3", features = [
     "console",
     "Performance",
     "Event",
+    "EventTarget",
+    "Node",
     "MouseEvent",
     "KeyboardEvent",
     "WebSocket",

@@ -89,6 +89,27 @@ pub fn DroneCard(drone: DroneState) -> impl IntoView {
         inline_svg(DRONE_SVG)
     );
 
+    // GPS closures live outside view!: the macro wants attribute values and
+    // children as single expressions, not block-bodied closures.
+    let fallback = (drone.position.latitude, drone.position.longitude);
+    let gps_text = move || {
+        let (lat, lon) = state
+            .live_positions
+            .get()
+            .get(&drone_id)
+            .map(|p| (p.latitude, p.longitude))
+            .unwrap_or(fallback);
+        format!(
+            "{:.4}°{} {:.4}°{}",
+            lat.abs(), if lat >= 0.0 { "N" } else { "S" },
+            lon.abs(), if lon >= 0.0 { "E" } else { "W" }
+        )
+    };
+    let gps_title = move || match state.live_positions.get().get(&drone_id).copied() {
+        Some(p) => format!("LIVE  ALT {:.0} m  HDG {:03.0}°", p.altitude_m, p.heading_deg),
+        None => "awaiting fix".to_string(),
+    };
+
     view! {
         <div
             class="drone-card"
@@ -107,6 +128,13 @@ pub fn DroneCard(drone: DroneState) -> impl IntoView {
                 </div>
                 <div class="text-xs text-muted" style="margin-top: 2px;">
                     "WP "{drone.current_waypoint}"/"{ drone.total_waypoints}
+                </div>
+                // GPS: reactive on the smoothed live fix, so the digits glide
+                // between server polls instead of stepping every 2 s. Falls
+                // back to the poll's own position until the first fix lands.
+                <div class="drone-gps" title=gps_title>
+                    <span class="gps-tag">"GPS"</span>
+                    {gps_text}
                 </div>
             </div>
             <div class="drone-metrics">

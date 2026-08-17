@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# app-service.yaml -- how the world reaches the app: Cilium Gateway API.
+#
+#   Gateway   (optional, gateway.create) : http :80 (redirect) + https :443 (TLS)
+#   HTTPRoute (https)                    : /graphql, /health -> api ; / -> frontend
+#   HTTPRoute (http)                     : RequestRedirect -> https (301)
+#
+# No Ingress. No annotations. Longest-prefix routing is a Gateway API
+# guarantee, so /graphql wins over / regardless of rule order, and /graphql/ws
+# (subscriptions) is covered by the /graphql prefix.
+# ---------------------------------------------------------------------------
+{{- if .Values.gateway.create }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ include "drone.gateway.namespace" . }}
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: {{ .Values.gateway.listeners.http.port }}
+      hostname: {{ .Values.hostname | quote }}
+      allowedRoutes:
+        namespaces: { from: All }
+    - name: https
+      protocol: HTTPS
+      port: {{ .Values.gateway.listeners.https.port }}
+      hostname: {{ .Values.hostname | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ include "drone.tls.secret" . }}
+      allowedRoutes:
+        namespaces: { from: All }
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "drone.fullname" . }}
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ include "drone.gateway.namespace" . }}
+      sectionName: https
+  hostnames:
+    - {{ .Values.hostname | quote }}
+  rules:
+    - matches:
+        {{- range .Values.route.apiPaths }}
+        - path: { type: PathPrefix, value: {{ . | quote }} }
+        {{- end }}
+      backendRefs:
+        - name: {{ include "drone.fullname" . }}-api
+          port: {{ .Values.api.port }}
+    - matches:
+        - path: { type: PathPrefix, value: {{ .Values.route.uiPath | quote }} }
+      backendRefs:
+        - name: {{ include "drone.fullname" . }}-frontend
+          port: {{ .Values.frontend.port }}
+{{- if .Values.gateway.httpsRedirect }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "drone.fullname" . }}-redirect
+  labels:
+    {{- include "drone.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ include "drone.gateway.namespace" . }}
+      sectionName: http
+  hostnames:
+    - {{ .Values.hostname | quote }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect: { scheme: https, statusCode: 301 }
+{{- end }}

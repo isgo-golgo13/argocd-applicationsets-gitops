@@ -6,6 +6,11 @@
 //!
 //! ## Classification: UNCLASSIFIED // FOR OFFICIAL USE ONLY
 
+/// Tactical theaters — the shared route table flown by the simulator and
+/// drawn by the frontend. See module docs.
+pub mod theaters;
+pub use theaters::{Theater, TheaterId};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

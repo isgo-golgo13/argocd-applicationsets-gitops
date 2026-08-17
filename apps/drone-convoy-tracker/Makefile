@@ -115,12 +115,22 @@ NC := \033[0m
 
 .PHONY: serve
 serve: deps-up
-	@printf "$(CYAN)▶ Starting API (release) and frontend dev server natively...$(NC)\n"
+	@printf "$(CYAN)▶ Starting API (release), frontend dev server and the convoy service...$(NC)\n"
 	@printf "$(GREEN)  Dashboard          http://localhost:3000$(NC)\n"
 	@printf "$(GREEN)  GraphQL playground http://localhost:8080/graphql$(NC)\n"
-	@printf "$(YELLOW)  Ctrl-C stops both. 'make stop' stops ScyllaDB and Redis.$(NC)\n"
+	@printf "$(GREEN)  Convoy service     flies sorties back-to-back; the dashboard's THEATER selector retasks it$(NC)\n"
+	@printf "$(YELLOW)  Ctrl-C stops all three. 'make stop' stops ScyllaDB and Redis. SIM=0 to run without the service.$(NC)\n"
 	@echo ""
-	@$(MAKE) --no-print-directory -j2 serve-api serve-frontend
+	@$(MAKE) --no-print-directory -j3 serve-api serve-frontend $(if $(filter 0,$(SIM)),,serve-sim)
+
+# The convoy service: the simulator in --service mode. It waits for the API,
+# flies sorties back to back, and obeys tasking orders from the convoy record
+# (the dashboard writes them via retaskConvoy). One process, no flags after
+# `make serve`. THEATER only seeds the FIRST sortie when the record has no
+# tasking yet; the dashboard is the commander from then on.
+.PHONY: serve-sim
+serve-sim:
+	@DRONE_SERVICE=true DRONE_THEATER=$(THEATER) $(CARGO) run --release --package drone-simulator
 
 .PHONY: serve-api
 serve-api:
@@ -199,6 +209,9 @@ help:
 	@printf "  $(BLUE)make touch$(NC)    restamp source mtimes (build runs this for you)\n"
 	@printf "\n"
 	@printf "  $(YELLOW)make stack-up$(NC)  everything in containers instead (needs podman-compose)\n"
+	@printf "  $(YELLOW)make kind-up$(NC)   3+3 KinD cluster w/ Cilium Gateway API + all operators\n"
+	@printf "  $(YELLOW)make kind-deploy$(NC) helm install the chart into it -> https://drone.localtest.me\n"
+	@printf "  $(YELLOW)make kind-down$(NC) delete the KinD cluster\n"
 	@printf "  $(YELLOW)make help-all$(NC)  full target list\n"
 	@printf "\n"
 
@@ -334,10 +347,16 @@ run-api-release: build-api
 	@printf "$(CYAN)▶ Starting GraphQL API (release)...$(NC)\n"
 	@$(TARGET_DIR)/release/drone-api
 
+# Theater that SEEDS the convoy service's first sortie when the convoy record
+# carries no tasking yet. After that the dashboard's THEATER selector is the
+# commander (retaskConvoy) and this value is ignored. Also the theater for a
+# manual `make run-simulator` sortie.
+THEATER ?= afghanistan
+
 .PHONY: run-simulator
-run-simulator:
-	@printf "$(CYAN)▶ Starting Drone Simulator...$(NC)\n"
-	@$(CARGO) run --package drone-simulator
+run-simulator:  ## single manual sortie (dev). `make serve` already runs the convoy service.
+	@printf "$(CYAN)▶ Starting Drone Simulator — single sortie ($(THEATER))...$(NC)\n"
+	@DRONE_THEATER=$(THEATER) $(CARGO) run --package drone-simulator
 
 .PHONY: run-simulator-release
 run-simulator-release: build-simulator
@@ -603,3 +622,52 @@ ci: check-deps lint test build
 .PHONY: ci-full
 ci-full: ci audit image
 	@printf "$(GREEN)✓ Full CI pipeline complete$(NC)\n"
+
+# =============================================================================
+# KUBERNETES -- KinD cluster + Helm chart (deploy/kubernetes, deploy/cluster)
+# =============================================================================
+CHART      := deploy/kubernetes/drone-convoy-attack-tracker
+KIND_NS    ?= drone-ops
+KIND_ENV   ?= nonprod
+
+# The chart's schema-init hook needs the CQL files INSIDE the chart directory
+# (Helm .Files cannot read outside it). schema/cql/ stays the single source of
+# truth; this copies it in before any render/package and is gitignored there.
+.PHONY: chart-sync
+chart-sync:
+	@mkdir -p $(CHART)/schema/cql && cp schema/cql/*.cql $(CHART)/schema/cql/
+
+.PHONY: chart-lint
+chart-lint: chart-sync
+	helm lint $(CHART) -f $(CHART)/values-$(KIND_ENV).yaml
+
+.PHONY: chart-template
+chart-template: chart-sync
+	helm template drone $(CHART) -n $(KIND_NS) -f $(CHART)/values-$(KIND_ENV).yaml
+
+.PHONY: kind-up
+kind-up:
+	@bash deploy/cluster/kind-bootstrap.sh
+
+.PHONY: kind-load
+kind-load: images
+	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-api:latest --name drone-ops
+	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-frontend:latest --name drone-ops
+
+.PHONY: kind-deploy
+kind-deploy: chart-sync
+	helm upgrade --install drone $(CHART) -n $(KIND_NS) --create-namespace \
+		-f $(CHART)/values-$(KIND_ENV).yaml \
+		--set image.registry=$(IMAGE_REGISTRY) \
+		--set image.api.repository=$(PROJECT_NAME)-api --set image.api.tag=latest \
+		--set image.frontend.repository=$(PROJECT_NAME)-frontend --set image.frontend.tag=latest \
+		--wait --timeout 15m
+	@bash deploy/cluster/kind-expose.sh $(KIND_NS) drone-gateway
+
+.PHONY: kind-status
+kind-status:
+	kubectl -n $(KIND_NS) get gateway,httproute,certificate,externalsecret,scyllacluster,hpa,vpa,pods
+
+.PHONY: kind-down
+kind-down:
+	kind delete cluster --name drone-ops

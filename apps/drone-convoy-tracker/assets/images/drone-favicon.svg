@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  drone-favicon.svg : top-down MQ-9 planform for Leaflet divIcon markers.
+
+  Nose points to 0deg (north / up), so the marker can be rotated directly by
+  the drone's heading_deg with no offset:  transform: rotate(<heading>deg)
+
+  THEMING. Colours are plain hex on the elements so the file renders correctly
+  anywhere, and the style block below re-themes them through CSS custom
+  properties. A CSS rule beats a presentation attribute in the cascade, so the
+  hex acts as the fallback and the custom property wins when set.
+
+  Do NOT move the colours into fill="var(...)" presentation attributes: custom
+  properties are substituted on CSS declarations, and support for them in raw
+  presentation attributes is inconsistent across renderers.
+
+  Set from the marker wrapper:
+    drone-body    airframe fill
+    drone-accent  accent, lights, sensor ball
+    drone-edge    panel line stroke
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="Unmanned aerial vehicle, top-down view">
+
+  <style>
+    .dr-body   { fill:   var(--drone-body,   #101915); }
+    .dr-edge   { stroke: var(--drone-edge,   #1f3a2a); }
+    .dr-fill-a { fill:   var(--drone-accent, #00ff41); }
+    .dr-str-a  { stroke: var(--drone-accent, #00ff41); }
+    .dr-str-b  { stroke: var(--drone-body,   #101915); }
+  </style>
+
+  <defs>
+    <filter id="dg-glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- sensor halo, sits under the airframe -->
+  <circle class="dr-fill-a" cx="32" cy="32" r="13" fill="#00ff41" opacity="0.07"/>
+
+  <g stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- main wing: long, thin, high aspect ratio -->
+    <path class="dr-body dr-edge" fill="#101915" stroke="#1f3a2a" stroke-width="0.6"
+          d="M3 30 H61 a2 2 0 0 1 0 4 H3 a2 2 0 0 1 0-4 Z"/>
+
+    <!-- wingtip navigation lights -->
+    <circle class="dr-fill-a" cx="4.5"  cy="32" r="1.5" fill="#00ff41" filter="url(#dg-glow)"/>
+    <circle class="dr-fill-a" cx="59.5" cy="32" r="1.5" fill="#00ff41" filter="url(#dg-glow)"/>
+
+    <!-- fuselage -->
+    <path class="dr-body dr-edge" fill="#101915" stroke="#1f3a2a" stroke-width="0.7"
+          d="M32 6
+             c 3.4 0 5.4 3.2 5.6 7.2
+             l 0.6 26
+             c 0.2 5.4 -1.2 9.6 -2.6 12.2
+             h -7.2
+             c -1.4 -2.6 -2.8 -6.8 -2.6 -12.2
+             l 0.6 -26
+             C 26.6 9.2 28.6 6 32 6 Z"/>
+
+    <!-- sensor ball under the nose -->
+    <circle class="dr-fill-a" cx="32" cy="12.5" r="3.1" fill="#00ff41" filter="url(#dg-glow)"/>
+    <circle cx="32" cy="12.5" r="1.2" fill="#0a0c0e" opacity="0.85"/>
+
+    <!-- dorsal spine -->
+    <path class="dr-str-a" d="M32 18 V41" stroke="#00ff41" stroke-width="0.8" opacity="0.4"/>
+
+    <!-- hardpoints -->
+    <rect class="dr-body dr-edge" x="16.5" y="29.4" width="4.2" height="5.2" rx="1.2"
+          fill="#101915" stroke="#1f3a2a" stroke-width="0.5"/>
+    <rect class="dr-body dr-edge" x="43.3" y="29.4" width="4.2" height="5.2" rx="1.2"
+          fill="#101915" stroke="#1f3a2a" stroke-width="0.5"/>
+
+    <!-- V-tail -->
+    <path class="dr-str-b" d="M28.4 47 L18 57" stroke="#101915" stroke-width="3.4" fill="none"/>
+    <path class="dr-str-b" d="M35.6 47 L46 57" stroke="#101915" stroke-width="3.4" fill="none"/>
+    <path class="dr-edge"  d="M28.4 47 L18 57" stroke="#1f3a2a" stroke-width="0.6" fill="none"/>
+    <path class="dr-edge"  d="M35.6 47 L46 57" stroke="#1f3a2a" stroke-width="0.6" fill="none"/>
+
+    <!-- pusher propeller: the airborne modifier class spins this group -->
+    <g class="drone-prop" style="transform-origin:32px 53px">
+      <path class="dr-str-a" d="M24 53 H40" stroke="#00ff41" stroke-width="1.1" opacity="0.45"/>
+      <ellipse class="dr-str-a" cx="32" cy="53" rx="8" ry="2.2" fill="none" stroke="#00ff41" stroke-width="0.5" opacity="0.22"/>
+    </g>
+    <circle class="dr-edge" cx="32" cy="53" r="1.4" fill="#1f3a2a"/>
+  </g>
+</svg>

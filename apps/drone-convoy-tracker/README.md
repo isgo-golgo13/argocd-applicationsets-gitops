@@ -24,17 +24,17 @@ Screenshot 5
 ## Project Structure
 
 ```shell
-drone-convoy-tracker
+drone-convoy-attack-tracker-leptos-rs
 ├── Cargo.lock
 ├── Cargo.toml
 ├── Makefile
 ├── README.md
 ├── assets
-│   ├── fonts
 │   └── images
-│       ├── drone.svg
-│       ├── explosion.svg
-│       └── target-streak.svg
+│       ├── drone.svg              # airframe: map markers (red) + drone cards (green)
+│       ├── drone-favicon.svg      # same airframe, HUD-green defaults, browser tab
+│       ├── explosion.svg          # impact bursts on the map
+│       └── target-streak.svg      # hit-streak roundel on the leaderboard
 ├── config
 │   └── app.toml
 ├── containers
@@ -56,11 +56,11 @@ drone-convoy-tracker
 │   ├── drone-domain
 │   │   ├── Cargo.toml
 │   │   └── src
-│   │       └── lib.rs
+│   │       ├── lib.rs
+│   │       └── theaters.rs        # the ONE theater/route table (sim flies it, UI draws it)
 │   ├── drone-frontend
 │   │   ├── Cargo.toml
 │   │   ├── Trunk.toml
-│   │   ├── assets
 │   │   ├── index.html
 │   │   ├── src
 │   │   │   ├── components
@@ -71,7 +71,9 @@ drone-convoy-tracker
 │   │   │   │   ├── header.rs
 │   │   │   │   ├── leaderboard.rs
 │   │   │   │   ├── map.rs
-│   │   │   │   └── mod.rs
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── regions.rs         # re-exports drone_domain::theaters
+│   │   │   │   └── tactical_select.rs # web-native HUD dropdown (the THEATER selector)
 │   │   │   ├── lib.rs
 │   │   │   ├── main.rs
 │   │   │   ├── services
@@ -124,15 +126,43 @@ drone-convoy-tracker
 │           ├── engagement.rs
 │           ├── flight.rs
 │           ├── lib.rs
-│           ├── main.rs
+│           ├── main.rs            # runs as the CONVOY SERVICE under `make serve`
 │           └── telemetry.rs
 ├── deploy
+│   ├── cloudflare
+│   │   └── cloudflare-workers
+│   │       └── wrangler.jsonc     # dashboard as Workers Static Assets
+│   ├── cluster
+│   │   ├── README-setup.md        # step-by-step KinD walkthrough
+│   │   ├── kind-bootstrap.sh      # Gateway API CRDs → Cilium → cert-manager → ESO → KEDA/VPA/scylla-operator
+│   │   ├── kind-config.yaml       # 3 control-plane + 3 workers
+│   │   └── kind-expose.sh
+│   ├── fly.io
+│   │   └── fly.prod.toml
+│   ├── kubernetes
+│   │   └── drone-convoy-attack-tracker   # Helm chart (Cilium Gateway API, cert-manager, ESO, KEDA/VPA/HPA)
+│   │       ├── Chart.yaml
+│   │       ├── templates
+│   │       │   ├── _helpers.tpl
+│   │       │   ├── app.yaml
+│   │       │   ├── app-config.yaml
+│   │       │   ├── app-metrics.yaml
+│   │       │   ├── app-scaling.yaml
+│   │       │   ├── app-secrets.yaml
+│   │       │   ├── app-service.yaml
+│   │       │   └── app-storage.yaml
+│   │       ├── values-nonprod.yaml
+│   │       ├── values-prod.yaml
+│   │       └── values.yaml
+│   └── railway
+│       ├── railway.nonprod.toml
+│       └── railway.prod.toml
 ├── docs
-│   ├── Screenshot 2026-08-13 at 22.30.00.png
-│   ├── Screenshot 2026-08-13 at 22.31.26.png
-│   ├── Screenshot 2026-08-13 at 22.32.06.png
-│   ├── Screenshot 2026-08-13 at 22.33.07.png
-│   └── Screenshot 2026-08-13 at 22.35.49.png
+│   ├── drone-convoy-1.png
+│   ├── drone-convoy-2.png
+│   ├── drone-convoy-3.png
+│   ├── drone-convoy-4.png
+│   └── drone-convoy-5.png
 └── schema
     └── cql
         ├── 000_keyspace_dev.cql
@@ -150,19 +180,41 @@ layer owns exactly one concern and the data flows in a single direction:
 
 ```
 drone-simulator ──GraphQL mutations──▶ drone-graphql-api ──▶ drone-persistence ──▶ ScyllaDB
-                                             │                      │
-                                             │                      └──▶ Redis (leaderboard read cache)
-                                             ▼
-                                   drone-frontend (Leptos/WASM)
-                                   2s GraphQL polling + /graphql/ws subscriptions
+  (convoy service)   telemetry/state/        │                      │
+        ▲            engagements             │                      └──▶ Redis (leaderboard read cache)
+        │                                    ▼
+        │  reads tasking order      drone-frontend (Leptos/WASM)
+        │  (convoy.aorName)         2s GraphQL polling + /graphql/ws subscriptions
+        │                                    │
+        └────── convoy record ◀── retaskConvoy ── THEATER selector (the UI is the commander)
 ```
+
+**The UI is the commander.** The dashboard never controls a process. Its
+THEATER selector issues a *tasking order* — the `retaskConvoy` mutation writes
+the theater onto the convoy record (`aor_name` = theater slug, `aor_center` =
+theater centre; both pre-existing columns, so no schema change). The simulator
+runs as a long-lived **convoy service** under `make serve`: it flies sorties
+back to back, reads the record between sorties and every few ticks mid-sortie,
+and on a change re-flies from the new theater's IP. Every dashboard observing
+the record sees the same switch. This is exactly the seam a live ground
+station plugs into later — the UI writes to the system of record, whatever
+flies the drones reads it — so nothing about the dashboard changes when the
+simulator is replaced.
+
+**One route table, two consumers.** `drone-domain/src/theaters.rs` holds the
+six theaters (Afghanistan/Kandahar — the default — Syria, Libya, Pakistan,
+Iran, Iraq), each with centre, AOR ring and sortie route. The simulator flies
+those exact waypoints and posts real positions; the frontend draws those exact
+waypoints as pins. Because both read one array, the airframes on the map, the
+GPS readout on each drone card, and the database all agree — in every theater.
 
 **Transports.** Three distinct transports, each chosen for what it carries:
 
 - **GraphQL over HTTP (axum + async-graphql)** is the command-and-query plane.
   The simulator posts `recordTelemetry`, `updateDroneState` and
-  `recordEngagement` mutations every tick; the dashboard polls `leaderboard`,
-  `drones` and `engagements` on a 2-second cadence. Every HTTP caller in the
+  `recordEngagement` mutations every tick and reads `convoy { aorName }` for
+  its tasking; the dashboard polls `leaderboard`, `drones` and `engagements`
+  on a 2-second cadence and issues `retaskConvoy` from the THEATER selector. Every HTTP caller in the
   codebase parses the GraphQL `errors[]` array rather than trusting the HTTP
   status — GraphQL rejections arrive in a 200 OK body, and a caller that only
   checks status logs success while writing nothing.
@@ -216,15 +268,24 @@ every GraphQL example in this README is reproducible verbatim in the
 playground.
 
 **Resilience.** The simulator probes `{ health }` until the API is up before
-its one-shot bootstrap, and drone identity rides on every per-tick
+its bootstrap, and drone identity rides on every per-tick
 `updateDroneState` (an idempotent read-merge-write upsert) — a lost
 registration self-heals within one tick.
+
+**Server-anchored map.** The airframes fly the positions the API reports, not
+a client-side route: each 2 s poll delivers a fix per drone, and the map's
+flight loop interpolates from the previous fix to the latest over one poll
+interval (clamped — it never extrapolates past ground truth) so a marker sits
+exactly on the database position at every poll boundary and glides between.
+The same smoothed fix drives the `GPS` readout on each drone card. Impact
+bursts render in a dedicated Leaflet pane *below* the airframes, fired from
+the shooting drone's live position when a new engagement lands in the feed.
 
 
 ## Build Prerequisites 
 
-Native toolchain (the default `make serve` path runs the API and frontend
-natively; containers are used only for the databases):
+Native toolchain (the default `make serve` path runs the API, the frontend
+and the convoy service natively; containers are used only for the databases):
 
 | Requirement | Version | Why |
 |---|---|---|
@@ -246,10 +307,15 @@ do not expect mounted init scripts to run.
 
 ```shell
 make build          # touch sweep + full workspace build (API, frontend, simulator)
-make serve          # starts ScyllaDB+Redis (podman), applies schema, runs API
-                    #   (release) + Trunk dev server natively
-make run-simulator  # second terminal: flies the ALPHA convoy for one mission
+make serve          # starts ScyllaDB+Redis (podman), applies schema, then runs — natively,
+                    #   in parallel — the API (release), the Trunk dev server, and the
+                    #   CONVOY SERVICE (the simulator, flying sorties back to back)
 ```
+
+That is the whole operator workflow. Open the dashboard and use the **THEATER**
+selector: pick a theater and the convoy is retasked to it — a small amber
+"RETASKING — CONVOY EN ROUTE" row shows under the AOR label for a few seconds,
+then the airframes appear on that theater's pins. No second command, no flags.
 
 Dashboard at `http://localhost:3000`, GraphQL playground at
 `http://localhost:8080/graphql`. First database boot takes ~60s; subsequent
@@ -257,23 +323,35 @@ runs reuse the running containers. `make db-reset` drops the keyspace inside
 the running container (seconds) for a clean demo; `make stop` stops the
 databases; `make help` lists the full front door.
 
+Optional knobs (none needed for the normal flow):
+
+- `THEATER=<slug>` seeds the *first* sortie when the convoy record carries no
+  tasking yet (default `afghanistan`); after that the selector is in charge.
+- `SIM=0 make serve` runs API + frontend without the convoy service.
+- `make run-simulator [THEATER=syria]` flies one manual sortie and exits —
+  a dev tool, not part of the operator flow.
+
 Two Make behaviors worth knowing rather than discovering:
 
 - `make build` runs a `touch` sweep first, because overlaying delivery zips
   restores archive mtimes and Cargo would otherwise skip "older" files.
   `TOUCH=0` opts out.
-- `make serve` builds API and frontend in parallel; the simulator's
+- `make serve` builds API, frontend and service in parallel; the service's
   `wait_for_api` probe exists precisely so a race against the API's release
   build cannot lose the bootstrap.
 
-The mission runs ~5 minutes. Engagements fire only between 25% and 75% of
-mission progress — an empty leaderboard in the first ~75 seconds is correct
-behavior, not a defect. At mission end, the simulator prints its FINAL
-LEADERBOARD; the playground `leaderboard` query must match it exactly, which
-is the end-to-end integrity check for the whole pipeline.
+Each sortie runs ~5 minutes; the service starts the next one automatically.
+Engagements fire only between 25% and 75% of sortie progress — an empty
+leaderboard in the first ~75 seconds of a sortie is correct behavior, not a
+defect. At sortie end, the service prints its FINAL LEADERBOARD; the
+playground `leaderboard` query must match it exactly, which is the end-to-end
+integrity check for the whole pipeline.
 
 Container images (`containers/Containerfile.api`, `.frontend`) build with a
 parameterised `ARG RUST_VERSION` (≥1.85) for the `make stack-up` path.
+Kubernetes: `deploy/cluster/README-setup.md` walks a KinD cluster (Cilium
+Gateway API, cert-manager, ESO, KEDA/VPA, scylla-operator) end to end;
+`make kind-up && make kind-load && make kind-deploy` → `https://drone.localtest.me`.
 
 
 ## References 

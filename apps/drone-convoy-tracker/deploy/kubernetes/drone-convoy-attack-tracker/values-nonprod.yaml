@@ -1,0 +1,36 @@
+# nonprod / KinD overlay -- laptop-sized. Everything not here inherits values.yaml.
+hostname: drone.localtest.me   # resolves to 127.0.0.1 -- no /etc/hosts edits
+
+api:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+frontend:
+  replicas: 1
+
+certificate:
+  issuerRef:
+    name: selfsigned-cluster-issuer   # created by deploy/cluster/kind-bootstrap.sh
+    kind: ClusterIssuer
+
+scylla:
+  members: 1
+  cpu: 1
+  memory: 2Gi
+  storageCapacity: 5Gi
+  developerMode: true          # KinD has no tuned disks or hugepages
+
+externalSecrets:
+  secretStoreRef:
+    name: drone-secret-store   # ESO `fake` provider, created by kind-bootstrap.sh
+    kind: ClusterSecretStore
+
+scaling:
+  hpa:
+    minReplicas: 1
+    maxReplicas: 3
+  vpa:
+    enabled: true
+  keda:
+    enabled: false

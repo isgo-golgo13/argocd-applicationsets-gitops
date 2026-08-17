@@ -4,6 +4,12 @@
 
 use leptos::prelude::*;
 
+/// Dissemination marking shown in the footer. FOUO ("For Official Use Only")
+/// is the legacy pre-2020 DoD marking; the current equivalent is CUI
+/// ("Controlled Unclassified Information"). Kept as one constant so the
+/// demo can wear whichever reads right for the room.
+pub const CLASSIFICATION_MARKING: &str = "UNCLASSIFIED // CUI";
+
 use crate::state::use_app_state;
 
 /// Footer status bar
@@ -52,7 +58,7 @@ pub fn Footer() -> impl IntoView {
                     <span class="text-sm">{move || connection_status().1}</span>
                 </span>
 
-                <span class="text-muted">"CLASSIFICATION: UNCLASSIFIED // FOUO"</span>
+                <span class="text-muted">{format!("CLASSIFICATION: {CLASSIFICATION_MARKING}")}</span>
             </div>
         </footer>
     }

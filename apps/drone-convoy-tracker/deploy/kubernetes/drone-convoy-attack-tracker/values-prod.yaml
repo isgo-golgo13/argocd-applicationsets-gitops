@@ -1,0 +1,51 @@
+# prod overlay. Everything not here inherits values.yaml.
+hostname: drone.CHANGEME.example.com
+
+image:
+  pullPolicy: Always
+
+api:
+  replicas: 3
+  enablePlayground: false
+  enableIntrospection: false
+  logLevel: "info"
+frontend:
+  replicas: 3
+
+gateway:
+  # Prod typically references the platform's shared Gateway rather than owning one.
+  create: false
+  name: platform-gateway
+  namespace: gateway-system
+
+certificate:
+  issuerRef:
+    name: letsencrypt-prod     # ClusterIssuer: ACME HTTP-01 solved via Gateway API
+    kind: ClusterIssuer
+
+scylla:
+  members: 3
+  cpu: 2
+  memory: 8Gi
+  storageCapacity: 100Gi
+  storageClassName: fast-ssd   # CHANGEME: your NVMe/SSD class
+  developerMode: false
+
+redis:
+  create: false
+  url: redis://CHANGEME-managed-redis:6379
+
+externalSecrets:
+  secretStoreRef:
+    name: CHANGEME-secret-store   # e.g. vault-backend / aws-secrets-manager
+    kind: ClusterSecretStore
+
+scaling:
+  hpa:
+    minReplicas: 3
+    maxReplicas: 12
+  keda:
+    enabled: true
+
+metrics:
+  enabled: true

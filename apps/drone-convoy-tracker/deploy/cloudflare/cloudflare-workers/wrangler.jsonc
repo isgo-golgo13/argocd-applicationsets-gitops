@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// Cloudflare Workers (Static Assets) -- the Leptos/WASM dashboard.
+// The frontend is a static bundle; Workers Static Assets serves it at the
+// edge with zero JS of ours running. The API lives elsewhere (Fly/Railway/K8s)
+// so the dashboard's API_URL must point at it and that API must list this
+// origin in CORS_ORIGINS.
+//   cd crates/drone-frontend && trunk build --release
+//   npx wrangler deploy --config ../../deploy/cloudflare/cloudflare-workers/wrangler.jsonc
+// ---------------------------------------------------------------------------
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
+  "name": "drone-convoy-attack-tracker",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "../../../crates/drone-frontend/dist",
+    "not_found_handling": "single-page-application",
+    "html_handling": "auto-trailing-slash"
+  },
+  "routes": [
+    { "pattern": "drone.CHANGEME.example.com", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}

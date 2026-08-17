@@ -1,0 +1,155 @@
+# ---------------------------------------------------------------------------
+# drone-convoy-attack-tracker -- COMMON values for every environment.
+# values-nonprod.yaml / values-prod.yaml are thin overlays on top of this.
+#
+# CLUSTER PREREQUISITES (this chart consumes, does not install):
+#   Cilium with gatewayAPI.enabled=true (Gateway API CRDs installed FIRST),
+#   cert-manager, external-secrets-operator, KEDA, VPA (recommender at least),
+#   scylla-operator (only when scylla.create=true).
+# deploy/cluster/kind-bootstrap.sh installs all of them for local testing.
+# ---------------------------------------------------------------------------
+
+nameOverride: ""
+
+image:
+  registry: ghcr.io/isgo-golgo13
+  api:
+    repository: drone-convoy-attack-tracker-api
+    tag: ""            # defaults to .Chart.AppVersion
+  frontend:
+    repository: drone-convoy-attack-tracker-frontend
+    tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+api:
+  replicas: 2
+  port: 8080
+  enablePlayground: true       # dev affordance; prod overlay turns it off
+  enableIntrospection: true
+  logLevel: "info,drone_graphql_api=debug"
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
+
+frontend:
+  replicas: 2
+  port: 80
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# Networking -- Cilium Kubernetes Gateway API. There is no Ingress in this
+# chart and no Ingress controller is assumed. One hostname fronts both the
+# dashboard and the API: the Leptos client talks same-origin /graphql, so
+# there is no CORS surface and no API URL baked into the WASM bundle.
+# ---------------------------------------------------------------------------
+gateway:
+  # true  -> this chart renders its own Gateway (KinD, single-app clusters)
+  # false -> reference a shared platform Gateway (multi-tenant clusters)
+  create: true
+  name: drone-gateway
+  namespace: ""                # empty = release namespace
+  className: cilium
+  listeners:
+    http:  { port: 80 }        # redirect-only listener
+    https: { port: 443 }
+  # HTTP -> HTTPS redirect via HTTPRoute RequestRedirect filter (Gateway API
+  # native; no annotations, no controller-specific knobs).
+  httpsRedirect: true
+
+hostname: drone.localtest.me   # overlays set the real host
+
+route:
+  # Longest-prefix match wins in Gateway API, so /graphql beats / regardless
+  # of ordering. /graphql/ws is covered by the /graphql prefix.
+  apiPaths: [/graphql, /health]
+  uiPath: /
+
+# ---------------------------------------------------------------------------
+# TLS -- cert-manager Certificate for the Gateway https listener.
+# prod: Let's Encrypt (ClusterIssuer letsencrypt-prod, HTTP-01 through the
+#       same Gateway -- cert-manager needs ExperimentalGatewayAPISupport).
+# KinD/nonprod: a self-signed ClusterIssuer created by kind-bootstrap.sh
+#       (Let's Encrypt cannot validate a cluster the internet can't reach).
+# ---------------------------------------------------------------------------
+certificate:
+  enabled: true
+  issuerRef:
+    name: selfsigned-cluster-issuer
+    kind: ClusterIssuer
+  duration: 2160h
+  renewBefore: 360h
+
+# ---------------------------------------------------------------------------
+# ScyllaDB. Owned by this chart by default so a fresh install yields a working
+# app; set create=false to point at a shared cluster (then only hosts is used).
+# ---------------------------------------------------------------------------
+scylla:
+  create: true
+  version: "6.2.0"
+  agentVersion: "3.4.0"
+  datacenter: dc1
+  rack: rack1
+  members: 3
+  cpu: 1
+  memory: 4Gi
+  storageCapacity: 20Gi
+  storageClassName: ""         # cluster default
+  # developerMode relaxes Scylla's hardware checks (io tuning, hugepages,
+  # NUMA) so it boots on laptops and KinD. NEVER in prod.
+  developerMode: false
+  keyspace: drone_ops
+  hosts: ""                    # only when create: false
+
+redis:
+  # In-chart single Redis for dev; prod points at a managed instance.
+  create: true
+  image: docker.io/library/redis:7-alpine
+  url: ""                      # only when create: false
+
+# ---------------------------------------------------------------------------
+# Secrets -- External Secrets Operator. The chart declares WHAT it needs
+# (scylla username/password); the store says WHERE it comes from. Any ESO
+# provider works (Vault, AWS SM, GCP SM, 1Password...). On KinD the
+# bootstrap creates a `fake` ClusterSecretStore so the chart is exercised
+# unchanged.
+# ---------------------------------------------------------------------------
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: drone-secret-store
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  remotePath: drone-convoy-attack-tracker
+
+scaling:
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  vpa:
+    # Recommender-only. Never updateMode Auto alongside an HPA on the same
+    # metric -- they fight. Read the recommendations (kubectl describe vpa)
+    # to size api.resources honestly.
+    enabled: true
+    updateMode: "Off"
+  keda:
+    # Event-driven scaling on GraphQL request rate from Prometheus. Requires
+    # metrics.enabled and a Prometheus reachable at scaling.keda.prometheus.
+    enabled: false
+    prometheus: http://prometheus-operated.monitoring:9090
+    threshold: "100"           # req/s per replica
+    minReplicas: 2
+    maxReplicas: 20
+
+metrics:
+  enabled: false               # ServiceMonitor; needs prometheus-operator CRDs
+  interval: 30s
+
+podSecurity:
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+  seccompProfile: RuntimeDefault

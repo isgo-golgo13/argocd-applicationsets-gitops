@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# Railway -- GraphQL API service (prod). Railway builds from the Containerfile
+# and injects PORT; SERVER_ADDR binds it. Redis: attach Railway's Redis plugin
+# (it sets REDIS_URL). ScyllaDB: external (ScyllaDB Cloud) via variables.
+#   railway up --config deploy/railway/railway.prod.toml
+# ---------------------------------------------------------------------------
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "containers/Containerfile.api"
+
+[deploy]
+startCommand = "sh -c 'SERVER_ADDR=0.0.0.0:${PORT:-8080} /usr/local/bin/drone-graphql-api'"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+numReplicas = 2
+
+[deploy.env]
+ENABLE_PLAYGROUND = "false"
+ENABLE_INTROSPECTION = "false"
+LOG_LEVEL = "info"
+SCYLLA_KEYSPACE = "drone_ops"
+CORS_ORIGINS = "https://drone.CHANGEME.example.com"
+# SCYLLA_HOSTS, SCYLLA_USERNAME, SCYLLA_PASSWORD -> Railway service variables (sealed)

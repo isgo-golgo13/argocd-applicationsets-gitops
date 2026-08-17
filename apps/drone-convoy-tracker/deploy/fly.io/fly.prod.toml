@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------------------
+# fly.io -- GraphQL API only. Fly is a natural home for the axum process:
+# native machines, anycast, built-in TLS. Databases stay external (ScyllaDB
+# Cloud + Upstash Redis are the pairing that keeps this a single Machine).
+#   fly launch --no-deploy --copy-config --config deploy/fly.io/fly.prod.toml
+#   fly secrets set SCYLLA_HOSTS=... SCYLLA_USERNAME=... SCYLLA_PASSWORD=... REDIS_URL=...
+#   fly deploy --config deploy/fly.io/fly.prod.toml
+# The frontend is static (Cloudflare Workers, see ../cloudflare) and calls this
+# API cross-origin -- so CORS_ORIGINS matters here, unlike in Kubernetes.
+# ---------------------------------------------------------------------------
+app = "drone-convoy-attack-tracker-api"
+primary_region = "mad"          # Madrid; pick the region nearest your users
+kill_signal = "SIGINT"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "../../containers/Containerfile.api"
+
+[env]
+  SERVER_ADDR = "0.0.0.0:8080"
+  ENABLE_PLAYGROUND = "false"
+  ENABLE_INTROSPECTION = "false"
+  LOG_LEVEL = "info"
+  SCYLLA_KEYSPACE = "drone_ops"
+  CORS_ORIGINS = "https://drone.CHANGEME.example.com"
+  # SCYLLA_HOSTS / SCYLLA_USERNAME / SCYLLA_PASSWORD / REDIS_URL -> fly secrets
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"

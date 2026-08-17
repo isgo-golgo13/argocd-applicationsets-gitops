@@ -473,3 +473,53 @@ pub async fn fetch_engagements(convoy_id: Uuid, limit: u32) -> Result<Vec<Engage
         })
         .collect())
 }
+
+/// Issue a tasking order: retask the convoy to a theater.
+///
+/// The dashboard's THEATER selector calls this. The convoy record becomes
+/// the system of record; the simulator (or a live ground station) obeys it.
+pub async fn retask_convoy(convoy_id: Uuid, theater_slug: &str) -> Result<(), String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Variables {
+        convoy_id: String,
+        theater: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Response {
+        retask_convoy: RetaskResult,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RetaskResult {
+        aor_name: String,
+    }
+
+    let request = GraphQLRequest {
+        query: r#"
+            mutation Retask($convoyId: String!, $theater: String!) {
+                retaskConvoy(input: { convoyId: $convoyId, theater: $theater }) { aorName }
+            }
+        "#,
+        variables: Variables { convoy_id: convoy_id.to_string(), theater: theater_slug.to_string() },
+    };
+
+    let response = Request::post(API_URL)
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let result: GraphQLResponse<Response> = response.json().await.map_err(|e| e.to_string())?;
+    if let Some(errors) = result.errors {
+        return Err(errors.into_iter().map(|e| e.message).collect::<Vec<_>>().join(", "));
+    }
+    let data = result.data.ok_or("No data in response")?;
+    log::info!("tasking order accepted: convoy now assigned to {}", data.retask_convoy.aor_name);
+    Ok(())
+}

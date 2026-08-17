@@ -17,7 +17,7 @@ filehash = true
 
 [watch]
 # Paths to watch for changes
-watch = ["src", "style", "assets", "index.html"]
+watch = ["src", "style", "../../assets", "index.html"]
 # Paths to ignore
 ignore = ["dist"]
 

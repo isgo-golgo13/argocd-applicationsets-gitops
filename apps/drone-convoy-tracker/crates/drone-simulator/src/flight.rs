@@ -49,6 +49,16 @@ pub enum WaypointType {
     Landing,
 }
 
+/// Initial great-circle bearing from `a` to `b`, degrees clockwise from north.
+pub fn bearing_deg(a: (f64, f64), b: (f64, f64)) -> f32 {
+    let (lat1, lon1) = (a.0.to_radians(), a.1.to_radians());
+    let (lat2, lon2) = (b.0.to_radians(), b.1.to_radians());
+    let dlon = lon2 - lon1;
+    let y = dlon.sin() * lat2.cos();
+    let x = lat1.cos() * lat2.sin() - lat1.sin() * lat2.cos() * dlon.cos();
+    (y.atan2(x).to_degrees().rem_euclid(360.0)) as f32
+}
+
 /// Flight path generator.
 pub struct FlightPathGenerator {
     /// Center point for mission area
@@ -73,6 +83,21 @@ impl FlightPathGenerator {
         }
     }
 
+    /// Create a generator centred on a theater (sets the altitude base; the
+    /// route itself comes from `generate_route_path`).
+    pub fn for_theater(t: &drone_domain::Theater) -> Self {
+        Self::new(
+            Coordinates {
+                latitude: t.center.0,
+                longitude: t.center.1,
+                altitude_m: 5000.0,
+                heading_deg: 0.0,
+                speed_mps: 0.0,
+            },
+            t.aor_radius_m / 1000.0 / 3.0,
+        )
+    }
+
     /// Create generator for Kandahar AOR.
     pub fn kandahar() -> Self {
         Self::new(
@@ -87,7 +112,107 @@ impl FlightPathGenerator {
         )
     }
 
+    /// Generate a mission path that FOLLOWS a theater route.
+    ///
+    /// This is the path the simulator flies for real. Waypoints are the
+    /// theater's published route points in order — the same array the
+    /// frontend draws as pins — so the positions posted to the API land
+    /// exactly on the track the dashboard shows. Takeoff/landing bracket the
+    /// route at its ends; the middle third is the target run (Target/Loiter
+    /// alternating, as before) so engagement gating and the INGRESS→EGRESS
+    /// status ladder keep their meaning. Headings are true leg bearings, not
+    /// random, so the airframe points where it flies.
+    ///
+    /// Slight per-drone lateral jitter (`spread_m`, metres, perpendicular to
+    /// the leg) keeps four drones on one route from stacking on a pixel.
+    pub fn generate_route_path(
+        &mut self,
+        route: &[(f64, f64)],
+        spread_m: f64,
+    ) -> Vec<Waypoint> {
+        let n = route.len();
+        let mut waypoints = Vec::with_capacity(n);
+        if n == 0 {
+            return waypoints;
+        }
+        let last = n - 1;
+        // Phase boundaries by index thirds: ingress | target run | egress.
+        let run_start = n / 3;
+        let run_end = (2 * n) / 3;
+
+        for i in 0..n {
+            let (lat, lon) = route[i];
+            // Bearing to the next point (or from the previous, at the end).
+            let (a, b) = if i < last { (route[i], route[i + 1]) } else { (route[i - 1], route[i]) };
+            let heading = bearing_deg(a, b);
+
+            // Perpendicular jitter so a formation reads as a formation.
+            let (jlat, jlon) = if spread_m.abs() > 0.0 {
+                let perp = (heading + 90.0f32).to_radians() as f64;
+                let dlat = (spread_m * perp.cos()) / 111_000.0;
+                let dlon = (spread_m * perp.sin()) / (111_000.0 * lat.to_radians().cos().max(0.2));
+                (dlat, dlon)
+            } else {
+                (0.0, 0.0)
+            };
+
+            let (wp_type, name, loiter) = if i == 0 {
+                (WaypointType::Takeoff, "TAKEOFF".to_string(), None)
+            } else if i == last {
+                (WaypointType::Landing, "LANDING".to_string(), None)
+            } else if i < run_start {
+                (WaypointType::Navigation, format!("INGRESS-{i}"), None)
+            } else if i < run_end {
+                if (i - run_start) % 2 == 1 {
+                    (WaypointType::Target, format!("TARGET-{}", i - run_start + 1), None)
+                } else {
+                    (WaypointType::Loiter, format!("OP-AREA-{}", i - run_start + 1),
+                     Some(self.rng.gen_range(300..900)))
+                }
+            } else if i >= last.saturating_sub(2) {
+                (WaypointType::Rtb, format!("RTB-{}", i - last.saturating_sub(2) + 1), None)
+            } else {
+                (WaypointType::Navigation, format!("EGRESS-{}", i - run_end + 1), None)
+            };
+
+            let alt_variation = Normal::new(0.0, 150.0).unwrap();
+            let altitude = match wp_type {
+                WaypointType::Takeoff => 0.0,
+                WaypointType::Landing => 100.0,
+                WaypointType::Target => self.base_altitude + 500.0,
+                _ => self.base_altitude + alt_variation.sample(&mut self.rng),
+            };
+            let speed = match wp_type {
+                WaypointType::Takeoff => 40.0,
+                WaypointType::Landing => 30.0,
+                WaypointType::Loiter => 45.0,
+                WaypointType::Target => 60.0,
+                _ => self.rng.gen_range(70.0..100.0),
+            };
+
+            waypoints.push(Waypoint {
+                id: Uuid::new_v4(),
+                sequence: i as u32,
+                name,
+                coordinates: Coordinates {
+                    latitude: lat + jlat,
+                    longitude: lon + jlon,
+                    altitude_m: altitude.max(0.0),
+                    heading_deg: heading,
+                    speed_mps: speed,
+                },
+                waypoint_type: wp_type,
+                loiter_time_sec: loiter,
+            });
+        }
+        waypoints
+    }
+
     /// Generate a complete mission flight path with 25 waypoints.
+    ///
+    /// LEGACY: random scatter around the generator's centre. Kept for the
+    /// unit tests and for anyone who wants an unscripted sortie; the live
+    /// simulator uses `generate_route_path` so its positions match the map.
     pub fn generate_mission_path(&mut self, callsign: &str) -> Vec<Waypoint> {
         let mut waypoints = Vec::with_capacity(25);
 

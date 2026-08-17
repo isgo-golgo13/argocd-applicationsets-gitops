@@ -231,9 +231,16 @@ body {
 }
 
 .map-overlay {
-    position: absolute; top: var(--space-md); left: var(--space-md);
-    z-index: 100; display: flex; flex-direction: column; gap: var(--space-sm);
+    /* Compact HUD card pinned to the map's TOP-RIGHT corner. Fixed width so
+       it is a square-ish card, never a bar: it cannot reach Leaflet's zoom
+       control at top-left regardless of viewport width. Above Leaflet's
+       panes (<=700) and controls (1000); below the header dropdown (2000). */
+    position: absolute; top: var(--space-md); right: var(--space-md);
+    width: 300px; max-width: calc(100% - 2 * var(--space-md) - 48px);
+    z-index: 1100; display: flex; flex-direction: column; align-items: stretch;
+    gap: var(--space-sm); pointer-events: none;
 }
+.map-overlay > * { pointer-events: auto; }
 
 .map-control {
     display: flex; align-items: center; gap: var(--space-sm);
@@ -432,3 +439,114 @@ body {
   .drone-air-marker { transition: none; }
   .drone-air-marker .drone-prop { animation: none; }
 }
+
+
+/* ---------------------------------------------------------------------------
+   TacticalSelect -- web-native dropdown in HUD language. NOT a <select>: the
+   OS would skin that. Button + panel, keyboard-driven, ARIA listbox.
+   --------------------------------------------------------------------------- */
+.tsel { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 176px; }
+.tsel-label {
+    font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase;
+    color: var(--text-muted); font-family: 'JetBrains Mono', monospace; line-height: 1;
+}
+.tsel-button {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm);
+    padding: 6px 10px; background: var(--bg-secondary); border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md); font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-primary); cursor: pointer; transition: border-color 120ms, box-shadow 120ms;
+}
+.tsel-button:hover, .tsel-button:focus-visible { outline: none; }
+.tsel-caret { display: inline-flex; color: currentColor; transition: transform 120ms; }
+.tsel-button[aria-expanded="true"] .tsel-caret { transform: rotate(180deg); }
+.tsel-panel {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 2000;
+    margin: 0; padding: 4px; list-style: none; background: var(--bg-secondary);
+    border: 1px solid var(--border-primary); border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+.tsel-option {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-secondary); border-radius: var(--radius-sm);
+}
+.tsel-tick { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
+.tsel-option.cursor { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+.tsel-option.selected { color: var(--text-primary); }
+.tsel-option.selected .tsel-tick { background: currentColor; box-shadow: 0 0 6px currentColor; }
+
+/* tones */
+.tsel.tone-accent .tsel-button { color: var(--accent-primary); border-color: var(--border-primary); }
+.tsel.tone-accent .tsel-button:hover, .tsel.tone-accent .tsel-button:focus-visible,
+.tsel.tone-accent .tsel-button[aria-expanded="true"] { border-color: var(--accent-primary); box-shadow: 0 0 8px rgba(0,255,65,0.35); }
+.tsel.tone-accent .tsel-option.selected { color: var(--accent-primary); }
+
+.tsel.tone-danger .tsel-button { color: var(--status-critical); border-color: rgba(255,51,51,0.45); }
+.tsel.tone-danger .tsel-button:hover, .tsel.tone-danger .tsel-button:focus-visible,
+.tsel.tone-danger .tsel-button[aria-expanded="true"] { border-color: var(--status-critical); box-shadow: 0 0 8px rgba(255,51,51,0.4); }
+.tsel.tone-danger .tsel-panel { border-color: rgba(255,51,51,0.45); }
+.tsel.tone-danger .tsel-option.selected { color: var(--status-critical); }
+
+/* ---------------------------------------------------------------------------
+   Impact bursts. Rendered in a dedicated Leaflet pane created at zIndex 550 --
+   BELOW markerPane (600) -- so an explosion never covers an airframe. The
+   burst is a one-shot keyframe that removes itself.
+   --------------------------------------------------------------------------- */
+.impact-div-icon { background: none; border: none; }
+.impact-burst {
+    width: 100%; height: 100%; transform-origin: 50% 50%;
+    animation: impact-burst 1200ms ease-out forwards;
+    filter: drop-shadow(0 0 6px rgba(255,120,40,0.9));
+    pointer-events: none;
+}
+.impact-burst svg { display: block; width: 100%; height: 100%; }
+.impact-burst.miss { filter: drop-shadow(0 0 4px rgba(255,255,255,0.5)) grayscale(1) opacity(0.6); }
+@keyframes impact-burst {
+    0%   { transform: scale(0.15); opacity: 0.0; }
+    12%  { transform: scale(1.05); opacity: 1.0; }
+    35%  { transform: scale(1.0);  opacity: 0.95; }
+    100% { transform: scale(1.35); opacity: 0.0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Map HUD card (top-right): AOR row, plus a stacked truth-guard warning row
+   only when the sim is flying a different theater. Dark near-opaque so text
+   never washes into satellite tiles.
+   --------------------------------------------------------------------------- */
+.map-hud {
+    display: flex; flex-direction: column;
+    background: rgba(6, 12, 8, 0.93); border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md); overflow: hidden;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.55);
+    font-family: 'JetBrains Mono', monospace; font-size: 0.74rem; letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.map-hud-row { display: flex; align-items: center; gap: 8px; padding: 7px 11px; }
+.map-hud-row.aor { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+.map-hud-row.retask {
+    border-top: 1px solid rgba(255, 170, 40, 0.45);
+    background: rgba(255, 170, 40, 0.10); color: #ffb437; font-weight: 600;
+    text-shadow: 0 0 6px rgba(255, 170, 40, 0.35);
+    white-space: normal; line-height: 1.3;     /* wraps inside the card, never clips */
+}
+.map-hud-row.error {
+    border-top: 1px solid rgba(255, 51, 51, 0.5); background: rgba(255, 51, 51, 0.10);
+    color: var(--status-critical); font-weight: 600; white-space: normal; line-height: 1.3;
+}
+.status-dot.pulse { animation: dot-pulse 1.2s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* GPS readout on drone cards: server-anchored, smoothed between polls */
+.drone-gps {
+    margin-top: 3px; display: flex; align-items: baseline; gap: 6px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; letter-spacing: 0.02em;
+    color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.drone-gps .gps-tag { font-size: 0.6rem; letter-spacing: 0.12em; color: var(--text-muted); }
+
+/* Bottom-right map readout: selected drone (or convoy lead) live ALT/HDG */
+.map-control.readout { gap: 10px; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.map-control.readout .readout-cs  { color: var(--accent-primary); font-weight: 700; }
+.map-control.readout .readout-val { color: var(--text-primary); font-weight: 600; min-width: 4.5ch; text-align: right; }

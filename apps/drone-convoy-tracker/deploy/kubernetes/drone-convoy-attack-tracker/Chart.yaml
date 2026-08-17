@@ -1,0 +1,37 @@
+apiVersion: v2
+name: drone-convoy-attack-tracker
+description: >-
+  DoD attack drone convoy tracking system — Rust: Leptos/WASM tactical HUD,
+  GraphQL API (axum + async-graphql), ScyllaDB + Redis. Served through the
+  Cilium Kubernetes Gateway API with cert-manager TLS.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [rust, leptos, wasm, graphql, scylladb, redis, gateway-api, cilium]
+home: https://github.com/isgo-golgo13/drone-convoy-attack-tracker-leptos-rs
+sources:
+  - https://github.com/isgo-golgo13/drone-convoy-attack-tracker-leptos-rs
+maintainers:
+  - name: Tomas Wallick
+
+# ---------------------------------------------------------------------------
+# NO dependencies — deliberately.
+#
+# This chart CONSUMES platform CRDs; it does not install the platforms:
+#
+#   Gateway API + Cilium   -> HTTPRoute, (optional) Gateway
+#   cert-manager           -> Certificate  (Let's Encrypt in prod, self-signed on KinD)
+#   External Secrets Op.   -> ExternalSecret
+#   KEDA                   -> ScaledObject
+#   VPA                    -> VerticalPodAutoscaler
+#   scylla-operator        -> ScyllaCluster
+#   HPA                    -> built into Kubernetes; nothing to install
+#
+# Vendoring cluster-scoped operators as subcharts of an application chart is
+# an anti-pattern: two apps would fight over one cert-manager, `helm uninstall`
+# would tear out the CNI, and Cilium cannot be a subchart of a workload it
+# carries. Cluster prerequisites are documented in values.yaml and installed
+# by deploy/cluster/kind-bootstrap.sh for local, or by your platform GitOps
+# (see the ArgoCD ApplicationSets reference repo) for real clusters.
+# ---------------------------------------------------------------------------
+dependencies: []
