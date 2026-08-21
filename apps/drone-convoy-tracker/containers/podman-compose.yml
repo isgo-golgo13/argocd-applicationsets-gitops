@@ -9,6 +9,24 @@
 # The api/frontend images are tagged localhost/ because they are built here.
 # The Helm chart in argocd-apps/cluster-apps/drone-convoy-tracker consumes the
 # same Containerfiles, pushed to a real registry.
+#
+# ARCHITECTURE
+#
+# This file builds for the HOST architecture -- arm64 on Apple silicon, amd64 on
+# a Linux workstation. That is right for local development and wrong for
+# anything you intend to run on a server, so do not push these images.
+#
+# For a registry image that runs on both, build the manifest directly rather
+# than through compose (compose has no multi-arch build):
+#
+#   podman build --platform linux/amd64,linux/arm64 \
+#     --manifest drone-convoy-tracker-api:v1 \
+#     -f containers/Containerfile.api .
+#
+# Every third-party image below publishes both linux/amd64 and linux/arm64, so
+# the stack comes up unchanged on either. The one to watch is any image you add
+# later: `podman manifest inspect docker.io/<image>:<tag>` lists the
+# architectures before you find out the hard way.
 
 services:
   # =============================================================================
@@ -28,7 +46,10 @@ services:
       - drone-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      # busybox wget, NOT curl: nginx:alpine has no curl, so the previous
+      # `curl -f` check could never pass and this container always reported
+      # unhealthy. Same fix as Containerfile.frontend.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
       interval: 30s
       timeout: 10s
       retries: 3

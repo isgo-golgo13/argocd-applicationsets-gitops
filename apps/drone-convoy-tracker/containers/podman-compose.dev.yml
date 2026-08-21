@@ -1,9 +1,40 @@
-# Docker Compose - Development Environment
-# Start with: docker compose -f docker/docker-compose.dev.yml up -d
+# Podman Compose - lightweight dev dependencies only (no api/frontend).
+#
+#   podman-compose -f containers/podman-compose.dev.yml up -d
+#
+# Use this when running the API and frontend natively (`make serve`) and you
+# only need ScyllaDB and Redis behind them. podman-compose.yml is the full
+# stack.
+#
+# ---------------------------------------------------------------------------
+# FULLY-QUALIFIED IMAGE NAMES
+#
+# Every image is docker.io/... on purpose. Podman has no implicit registry the
+# way Docker does: a bare `redis:7-alpine` either prompts for a registry or
+# fails outright under a locked registries.conf, which is the default on many
+# Linux distributions. The short names here previously worked on a permissive
+# macOS setup and failed on a hardened Linux one -- the same file, two outcomes.
+#
+# ---------------------------------------------------------------------------
+# ARCHITECTURE
+#
+# ScyllaDB and Redis publish both linux/amd64 and linux/arm64, so this stack
+# comes up unchanged on Apple silicon and on an amd64 Linux workstation.
+#
+# redis-commander does NOT publish arm64 reliably. It is commented out below
+# rather than deleted: on Apple silicon it either fails to pull or runs under
+# emulation. Uncomment it on amd64, or use `redis-cli` in the redis container,
+# which is already there and needs nothing extra:
+#
+#   podman exec -it redis redis-cli
+#
+# Before adding any image here, check what it publishes:
+#   podman manifest inspect docker.io/<image>:<tag>
+# ---------------------------------------------------------------------------
 
 services:
   scylla:
-    image: scylladb/scylla:5.4
+    image: docker.io/scylladb/scylla:5.4
     container_name: scylla
     ports:
       - "9042:9042"
@@ -21,7 +52,7 @@ services:
       - drone-net
 
   redis:
-    image: redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     container_name: redis
     ports:
       - "6379:6379"
@@ -36,17 +67,21 @@ services:
     networks:
       - drone-net
 
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: redis-commander
-    environment:
-      - REDIS_HOSTS=local:redis:6379
-    ports:
-      - "8081:8081"
-    depends_on:
-      - redis
-    networks:
-      - drone-net
+  # Disabled by default: no dependable linux/arm64 image, so this fails to pull
+  # on Apple silicon. Uncomment on an amd64 host, or just use redis-cli:
+  #   podman exec -it redis redis-cli
+  #
+  # redis-commander:
+  #   image: docker.io/rediscommander/redis-commander:latest
+  #   container_name: redis-commander
+  #   environment:
+  #     - REDIS_HOSTS=local:redis:6379
+  #   ports:
+  #     - "8081:8081"
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - drone-net
 
 volumes:
   scylla-data:

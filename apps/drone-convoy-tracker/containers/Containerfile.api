@@ -7,6 +7,32 @@
 # no earlier toolchain can parse -- the previous 1.83 base could never have
 # built this tree. Bump the default to current stable and keep it pinned;
 # `rust:latest` in a delivery artifact is not reproducible.
+#
+# ------------------------------------------------------------------------------
+# CROSS-ARCHITECTURE
+#
+# Apple silicon builds linux/arm64. Most servers -- and every on-premises or
+# cloud Kubernetes node this is likely to land on -- are linux/amd64. The same
+# image on the wrong architecture fails with `exec format error`, which reads
+# like a corrupt image and is not.
+#
+# Single architecture, for local work:
+#   podman build -f containers/Containerfile.api -t drone-convoy-tracker-api:dev .
+#
+# Both architectures, for a registry:
+#   podman build --platform linux/amd64,linux/arm64 \
+#     --manifest drone-convoy-tracker-api:v1 \
+#     -f containers/Containerfile.api .
+#   podman manifest push --all drone-convoy-tracker-api:v1 \
+#     docker://<registry>/drone-convoy-tracker-api:v1
+#
+# A multi-arch manifest CANNOT be side-loaded into KinD -- it has to go to a
+# registry. Build single-arch for local clusters.
+#
+# Note: building linux/amd64 on Apple silicon runs the compiler under QEMU
+# emulation, and Rust under QEMU is very slow -- expect roughly an order of
+# magnitude. Acceptable once for a lab image; build amd64 on an amd64 CI runner
+# if it becomes routine.
 # ==============================================================================
 
 # -----------------------------------------------------------------------------
@@ -14,6 +40,13 @@
 # -----------------------------------------------------------------------------
 ARG RUST_VERSION=1.89
 FROM docker.io/library/rust:${RUST_VERSION}-slim-bookworm AS builder
+
+# Supplied automatically by the builder when --platform is used. Declared so
+# they are visible to the RUN below; harmless on a single-arch build, where
+# TARGETARCH resolves to the host's architecture.
+ARG TARGETARCH
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -31,14 +64,41 @@ COPY crates ./crates
 # and the DuckDB-bundled analytics crate, so the previous `sed -i` surgery on
 # Cargo.toml is unnecessary -- and it desynchronised Cargo.lock, which is why
 # --locked could never be used here.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release --locked --package drone-graphql-api && \
-    cp target/release/drone-api /app/drone-api
+#
+# ---------------------------------------------------------------------------
+# WHY --target IS NOW EXPLICIT
+#
+# Without it, cargo writes to target/release/ regardless of architecture. The
+# /app/target cache mount is shared across the legs of a multi-arch build, so
+# the amd64 and arm64 legs would write their binaries to the SAME path and
+# overwrite each other. The build succeeds and one of the two images then
+# contains a binary for the wrong architecture -- a failure that only surfaces
+# at runtime, on whichever cluster got the bad leg.
+#
+# Naming the triple puts each architecture in target/<triple>/release/, so the
+# legs cannot collide even sharing one cache. This does not rely on per-platform
+# cache ids, which are not portable across builder implementations.
+#
+# sharing=locked serialises concurrent access to the registry cache rather than
+# letting two legs corrupt it.
+# ---------------------------------------------------------------------------
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    set -eux; \
+    case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+      amd64) RUST_TRIPLE=x86_64-unknown-linux-gnu ;; \
+      arm64) RUST_TRIPLE=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    rustup target add "${RUST_TRIPLE}"; \
+    cargo build --release --locked --target "${RUST_TRIPLE}" --package drone-graphql-api; \
+    cp "target/${RUST_TRIPLE}/release/drone-api" /app/drone-api
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
 # -----------------------------------------------------------------------------
+# No --platform here, deliberately: the runtime image must match the TARGET
+# architecture, which is the default behaviour.
 FROM docker.io/library/debian:bookworm-slim AS runtime
 
 # Install runtime dependencies
@@ -80,6 +140,8 @@ ENV ENABLE_PLAYGROUND=true
 
 EXPOSE 8080
 
+# curl is installed above, so this works. (The frontend image is alpine-based
+# and has no curl -- see Containerfile.frontend.)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
