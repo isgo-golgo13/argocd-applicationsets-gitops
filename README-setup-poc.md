@@ -167,7 +167,12 @@ for env in nonprod prod; do
     --format '{{ (index .NetworkSettings.Networks "kind").IPAddress }}')
 
   # 3. Cilium, replacing kube-proxy (the KinD config set kubeProxyMode: none)
+  # Pinned. Cilium's flags move between minors, and an unpinned install is how
+  # a tutorial that worked last month stops working mid-screenshare. Check
+  # `helm search repo cilium/cilium --versions` and the Cilium KinD guide if you
+  # raise it.
   helm --kube-context "$CTX" upgrade --install cilium cilium/cilium \
+    --version 1.16.5 \
     --namespace kube-system \
     --set kubeProxyReplacement=true \
     --set k8sServiceHost="${API_IP}" \
@@ -505,6 +510,41 @@ kubectl --context kind-workload-nonprod -n nonprod-drone-convoy-tracker \
   get scyllacluster,pods,svc,httproute
 ```
 
+> ### KinD requires ScyllaDB developer mode — read before running prod
+>
+> `developerMode: false` is correct on real hardware and required for a
+> supported ScyllaDB production deployment. It enforces preflight checks: an
+> XFS filesystem, tuned disk IO, dedicated CPUs.
+>
+> **KinD satisfies none of them.** The local-path provisioner hands out an
+> overlayfs directory, so with developer mode off Scylla refuses to start and
+> the pod sits in `CrashLoopBackOff` with a filesystem complaint that reads
+> like a bug and is not one.
+>
+> The `nonprod`, `preprod` and `uat` overlays already set
+> `scylla.developerMode: true` — legitimate for non-production. **The `prod`
+> overlay deliberately does not**, because shipping a production default of
+> `true` is exactly the mistake this repository should not teach.
+>
+> So on KinD, the prod spoke's Scylla will not start until you say so
+> explicitly:
+>
+> ```bash
+> cat >> argocd-apps/cluster-apps/drone-convoy-tracker/env/prod/values-prod.yaml <<'EOF'
+>
+> # KinD ACCOMMODATION ONLY -- revert before this overlay reaches real hardware.
+> # KinD has no XFS and no tuned disk, so ScyllaDB cannot run in production mode.
+> scylla:
+>   developerMode: true
+> EOF
+> git add -A && git commit -m "poc: scylla developer mode for KinD prod spoke" && git push
+> ```
+>
+> If you would rather keep the prod overlay honest, skip this and run the app on
+> the nonprod spoke only. **Step 12, the AppProject demonstration, works either
+> way** — it shows an Application being *rejected*, which does not require the
+> prod workload to be healthy.
+
 > **If the API pods are in `CrashLoopBackOff`**, they almost certainly started
 > before Scylla was accepting connections. Check the logs:
 > ```bash
@@ -695,6 +735,8 @@ demonstration.
 | No `cilium` GatewayClass | Cilium started before the Gateway API CRDs | `rollout restart deploy/cilium-operator` |
 | HTTPRoute has no parents | Gateway missing or name mismatch | `kubectl -n gateway-system get gateway` |
 | ScyllaCluster never becomes ready | scylla-operator webhook has no cert | Check cert-manager is Healthy (wave −2) |
+| Scylla pods `CrashLoopBackOff` with a filesystem or IO complaint | `developerMode: false` on KinD | See the developer-mode box in step 10 |
+| Rust app images cannot be pulled | `image.registry` still points at a placeholder | Build and `kind load docker-image`, or push to your registry |
 | Gateway Service stuck `<pending>` | KinD has no LoadBalancer | Port-forward, or `cloud-provider-kind` |
 | Git changes have no effect | Not committed and pushed | ArgoCD reads Git, not your working copy |
 
