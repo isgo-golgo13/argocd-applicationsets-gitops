@@ -8,7 +8,13 @@
 # This exists because the address a spoke is reachable at FROM THE HUB is not
 # the address in your kubeconfig. kubectl talks to a spoke via 127.0.0.1:<random
 # host port>; inside the hub container, 127.0.0.1 is the hub. The hub reaches a
-# spoke over the shared `kind` Docker network instead.
+# spoke over the shared container network instead.
+#
+# The address is read from the spoke's own Kubernetes node object, NOT from
+# `docker inspect`. The node InternalIP IS the container's address on that
+# network, and reading it through kubectl works identically whether KinD is
+# backed by Docker or Podman -- which matters here, because this project builds
+# with Podman.
 #
 # Getting this wrong is the single most common way this POC fails, and it fails
 # confusingly: `argocd cluster add` appears to succeed and every Application
@@ -16,35 +22,41 @@
 #
 #   ./poc/register-spokes.sh
 #
-# Prerequisites: kind, kubectl, docker, argocd CLI, and an argocd login against
-# the hub (README-setup-poc.md step 5).
+# Prerequisites: kind, kubectl, argocd CLI, and an argocd login against the hub
+# (README-setup-poc.md step 5). No container runtime binary needed.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 SPOKES=("nonprod" "prod")
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-command -v argocd >/dev/null || { echo "argocd CLI not found"; exit 1; }
-command -v docker >/dev/null || { echo "docker not found"; exit 1; }
+command -v argocd  >/dev/null || { echo "argocd CLI not found"; exit 1; }
+command -v kubectl >/dev/null || { echo "kubectl not found"; exit 1; }
 
 echo "==> hub context: kind-gitops-hub"
 kubectl config use-context kind-gitops-hub >/dev/null
 
 declare -A ADDR
 for env in "${SPOKES[@]}"; do
-  container="workload-${env}-control-plane"
+  spoke_ctx="kind-workload-${env}"
 
-  if ! docker inspect "$container" >/dev/null 2>&1; then
-    echo "!! $container not running -- create the spoke first:"
+  if ! kubectl config get-contexts "$spoke_ctx" >/dev/null 2>&1; then
+    echo "!! no kubeconfig context ${spoke_ctx} -- create the spoke first:"
     echo "   kind create cluster --config poc/kind/spoke-${env}.yaml"
     exit 1
   fi
 
-  # The address on the shared kind Docker network, which is what the hub can
-  # reach. Not the kubeconfig address.
-  ip="$(docker inspect "$container" \
-        --format '{{ (index .NetworkSettings.Networks "kind").IPAddress }}')"
-  [[ -n "$ip" ]] || { echo "!! could not read the kind-network IP of $container"; exit 1; }
+  # The node's InternalIP is its address on the shared container network, which
+  # is exactly what the hub can reach. Provider-agnostic: works the same under
+  # Docker and Podman, and needs neither binary.
+  ip="$(kubectl --context "$spoke_ctx" get nodes \
+        -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)"
+  [[ -n "$ip" ]] || {
+    echo "!! could not read the InternalIP of ${spoke_ctx}'s first node."
+    echo "   Is the spoke Ready? Nodes stay NotReady until Cilium is installed,"
+    echo "   but the InternalIP is set well before that."
+    exit 1
+  }
   ADDR[$env]="https://${ip}:6443"
   echo "==> ${env}: ${ADDR[$env]}"
 

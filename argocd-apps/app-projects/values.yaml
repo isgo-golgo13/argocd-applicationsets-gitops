@@ -85,7 +85,7 @@ sourceRepos:
 #
 # `server` is matched literally by ArgoCD against the Application's
 # destination.server, so these must be the exact strings ArgoCD registered the
-# clusters under. For KinD spokes that is the Docker network address of the
+# clusters under. For KinD spokes that is the container network address of the
 # spoke's control-plane container, NOT localhost -- see README-setup-poc.md.
 # ---------------------------------------------------------------------------
 environments:

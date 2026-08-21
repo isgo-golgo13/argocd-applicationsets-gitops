@@ -78,6 +78,23 @@ All four environment overlays (nonprod/preprod/uat/prod) stay in the charts;
 the POC registers two clusters and the other overlays simply go unused, which
 is what `ignoreMissingValueFiles` is for.
 
+## Runtime
+
+The proof of concept assumes **Podman**, matching the application's
+`containers/` build. `KIND_EXPERIMENTAL_PROVIDER=podman` is set in step 1 of
+the tutorial, resource limits are set on the Podman VM rather than a Docker
+daemon, and images are side-loaded with `podman save` + `kind load
+image-archive` — `kind load docker-image` reads the Docker daemon and cannot
+see a Podman image.
+
+Spoke registration reads the node's `InternalIP` through kubectl instead of
+`docker inspect`, so it is provider-agnostic and needs no container runtime
+binary at all.
+
+Also documented: Apple silicon builds arm64, VKS on ESXi is x86_64, and the
+same image fails there with `exec format error`. Multi-arch build instructions
+are in the tutorial before the screenshare running order.
+
 ## Validation
 
 ```

@@ -68,18 +68,46 @@ from two ApplicationSets is the first "oh" moment of the demo.
 
 | Tool | Check | Install |
 |---|---|---|
-| Docker | `docker version` | Docker Desktop, Colima or Podman-in-Docker mode |
+| Podman | `podman version` | `brew install podman` |
 | kind | `kind version` | `brew install kind` |
 | kubectl | `kubectl version --client` | `brew install kubectl` |
 | helm | `helm version` | `brew install helm` |
 | argocd CLI | `argocd version --client` | `brew install argocd` |
 | jq | `jq --version` | `brew install jq` |
 
-**Resources.** Three KinD clusters with Cilium and ScyllaDB want roughly
-**8 CPUs and 12 GB of RAM** given to Docker. On Docker Desktop:
-Settings → Resources. If you have less, run one spoke instead of two — the
-architecture is identical, you just lose the per-environment AppProject
-demonstration in step 12.
+### Podman, and telling KinD to use it
+
+This project builds with Podman, so KinD should use Podman too — mixing runtimes
+means your images land in a store KinD cannot read.
+
+```bash
+export KIND_EXPERIMENTAL_PROVIDER=podman
+```
+
+Put that in your shell profile for the duration. Every `kind` command in this
+document assumes it is set; without it KinD looks for Docker and either fails or
+silently builds a cluster your Podman images cannot reach.
+
+**Resources.** On macOS, Podman runs in a VM, and the VM's limits are what
+matter — not the host's. Three KinD clusters with Cilium and ScyllaDB need a
+generous one:
+
+```bash
+podman machine stop
+podman machine rm
+podman machine init --cpus 10 --memory 20480 --disk-size 100
+podman machine start
+podman machine inspect | grep -iE "cpus|memory|diskSize"
+```
+
+The **100 GB disk** matters more than people expect. The default is smaller, and
+five KinD nodes plus Cilium, ScyllaDB, the operators and your application images
+will crowd it. Running out mid-demo presents as pods stuck in `ImagePullBackOff`
+with no obvious cause.
+
+If you cannot spare that, run **one** spoke instead of two — the architecture is
+identical. You lose the per-environment AppProject comparison in step 12, which
+is the best moment in the demo, so free up memory before you give that up.
 
 **A fork you can push to.** ArgoCD clones the repository over the network; it
 cannot read your laptop's filesystem. Fork this repo, push it, and note the
@@ -162,9 +190,12 @@ for env in nonprod prod; do
   kubectl --context "$CTX" apply -f \
     https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
 
-  # 2. The API server address as seen from INSIDE the cluster's own containers
-  API_IP=$(docker inspect "workload-${env}-control-plane" \
-    --format '{{ (index .NetworkSettings.Networks "kind").IPAddress }}')
+  # 2. The API server address as seen from INSIDE the cluster's own containers.
+  #    Read from the node object rather than `podman inspect` or
+  #    `docker inspect`: the InternalIP IS the container's address on the shared
+  #    network, and kubectl gives the same answer under either runtime.
+  API_IP=$(kubectl --context "$CTX" get nodes \
+    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
   # 3. Cilium, replacing kube-proxy (the KinD config set kubeProxyMode: none)
   # Pinned. Cilium's flags move between minors, and an unpinned install is how
@@ -276,7 +307,10 @@ argocd login localhost:8080 \
 
 Your kubeconfig reaches a spoke at `https://127.0.0.1:<random-port>`. That
 address is meaningless inside the hub's container, where `127.0.0.1` is the
-hub itself. The hub reaches a spoke over the shared `kind` Docker network.
+hub itself. The hub reaches a spoke over the shared container network.
+
+The address is read from the spoke's own node object (`InternalIP`), which is
+the same under Podman and Docker and needs neither binary.
 
 If you register the kubeconfig address, `argocd cluster add` **appears to
 succeed** and every Application later reports a connection timeout.
@@ -293,8 +327,8 @@ addresses:
 
 ```bash
 for env in nonprod prod; do
-  IP=$(docker inspect "workload-${env}-control-plane" \
-       --format '{{ (index .NetworkSettings.Networks "kind").IPAddress }}')
+  IP=$(kubectl --context "kind-workload-${env}" get nodes \
+       -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
   echo "${env} -> https://${IP}:6443"
 
   argocd cluster add "kind-workload-${env}" \
@@ -555,13 +589,43 @@ kubectl --context kind-workload-nonprod -n nonprod-drone-convoy-tracker \
 > beyond five minutes, confirm the ScyllaCluster reports members ready.
 
 > **If the images cannot be pulled**, the chart points at
-> `ghcr.io/CHANGEME-ORG/...`. Either push images to your registry and update
-> `image.registry`, or build locally and side-load:
+> `ghcr.io/CHANGEME-ORG/...`. Either push to a registry the spokes can reach, or
+> build with Podman and side-load.
+>
+> `kind load docker-image` reads the Docker daemon and will not see a Podman
+> image even with `KIND_EXPERIMENTAL_PROVIDER=podman`. Go through an archive
+> instead — this works under either runtime:
+>
 > ```bash
-> kind load docker-image drone-convoy-tracker-api:dev --name workload-nonprod
+> cd apps/drone-convoy-tracker
+> podman build -f containers/Containerfile.api      -t drone-convoy-tracker-api:dev .
+> podman build -f containers/Containerfile.frontend -t drone-convoy-tracker-frontend:dev .
+>
+> for img in api frontend; do
+>   podman save -o "/tmp/dct-${img}.tar" "drone-convoy-tracker-${img}:dev"
+>   for c in workload-nonprod workload-prod; do
+>     kind load image-archive "/tmp/dct-${img}.tar" --name "$c"
+>   done
+> done
 > ```
-> then set `image.registry` and `image.api.tag` in
-> `cluster-apps/drone-convoy-tracker/env/nonprod/values-nonprod.yaml`.
+>
+> Then point the chart at the local tag, in each environment overlay:
+>
+> ```yaml
+> # cluster-apps/drone-convoy-tracker/env/nonprod/values-nonprod.yaml
+> image:
+>   registry: ""            # no registry -- use the side-loaded local image
+>   api:
+>     repository: drone-convoy-tracker-api
+>     tag: dev
+>   frontend:
+>     repository: drone-convoy-tracker-frontend
+>     tag: dev
+>   pullPolicy: IfNotPresent
+> ```
+>
+> `pullPolicy: IfNotPresent` is load-bearing — with `Always` the kubelet tries
+> to pull a tag that exists nowhere and the side-load is wasted.
 
 ---
 
@@ -736,7 +800,10 @@ demonstration.
 | HTTPRoute has no parents | Gateway missing or name mismatch | `kubectl -n gateway-system get gateway` |
 | ScyllaCluster never becomes ready | scylla-operator webhook has no cert | Check cert-manager is Healthy (wave −2) |
 | Scylla pods `CrashLoopBackOff` with a filesystem or IO complaint | `developerMode: false` on KinD | See the developer-mode box in step 10 |
-| Rust app images cannot be pulled | `image.registry` still points at a placeholder | Build and `kind load docker-image`, or push to your registry |
+| Rust app images cannot be pulled | `image.registry` still points at a placeholder | `podman save` + `kind load image-archive` — see step 10 |
+| `kind load docker-image` says the image is not present | It reads the Docker daemon, not Podman's store | Use `kind load image-archive` |
+| `kind create cluster` cannot find a runtime | `KIND_EXPERIMENTAL_PROVIDER` not set | `export KIND_EXPERIMENTAL_PROVIDER=podman` |
+| `exec format error` on an x86_64 cluster | arm64 images built on Apple silicon | Build multi-arch — see below |
 | Gateway Service stuck `<pending>` | KinD has no LoadBalancer | Port-forward, or `cloud-provider-kind` |
 | Git changes have no effect | Not committed and pushed | ArgoCD reads Git, not your working copy |
 
@@ -749,6 +816,34 @@ argocd app logs nonprod-drone-convoy-tracker
 kubectl -n argocd logs deploy/argocd-applicationset-controller --tail=100
 kubectl -n argocd logs deploy/argocd-application-controller --tail=100
 ```
+
+---
+
+## Building for the lab as well as the laptop
+
+Apple silicon builds **arm64**. KinD on an Apple-silicon Mac runs arm64 nodes,
+so the local demo is fine. Most on-premises and cloud clusters are **x86_64**,
+and the same image there fails with `exec format error` — which reads like a
+corrupt image and is not.
+
+Build multi-arch once and both targets work:
+
+```bash
+podman build --platform linux/amd64,linux/arm64 \
+  --manifest drone-convoy-tracker-api:v1 \
+  -f containers/Containerfile.api .
+
+podman manifest push --all \
+  drone-convoy-tracker-api:v1 \
+  docker://<registry>/drone-convoy-tracker-api:v1
+```
+
+A multi-arch manifest cannot be side-loaded into KinD — it has to go to a
+registry. So for local work build arm64-only and side-load per step 10; do the
+multi-arch push separately when preparing an x86_64 target such as an
+on-premises lab or an EKS/GKE cluster.
+
+Check your base images publish both architectures. Rust and nginx do.
 
 ---
 
