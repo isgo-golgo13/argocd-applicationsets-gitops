@@ -61,9 +61,38 @@ TRUNK := trunk
 WASM_TARGET := wasm32-unknown-unknown
 
 PODMAN := podman
+DOCKER := docker
 COMPOSE := podman-compose
+
+# Where `make image` tags locally. localhost/ keeps built images out of any
+# registry namespace until you deliberately push.
 IMAGE_REGISTRY ?= localhost
 IMAGE_TAG := $(VERSION)-$(GIT_SHA)
+
+# ------------------------------------------------------------------------------
+# Container registry -- Docker Hub
+#
+# Override the user on the command line if you push somewhere else:
+#   make push DOCKERHUB_USER=someone-else
+#   make push REGISTRY=ghcr.io/my-org
+#
+# NOTE the fully-qualified docker.io/ prefix. Podman has no implicit registry
+# the way Docker does: a bare `isgogolgo13/drone-convoy-tracker-api` either
+# prompts for a registry or fails outright under a locked registries.conf.
+# ------------------------------------------------------------------------------
+DOCKERHUB_USER ?= isgogolgo13
+REGISTRY       ?= docker.io/$(DOCKERHUB_USER)
+
+API_IMAGE  := $(REGISTRY)/$(PROJECT_NAME)-api
+UI_IMAGE   := $(REGISTRY)/$(PROJECT_NAME)-frontend
+
+LOCAL_API  := $(IMAGE_REGISTRY)/$(PROJECT_NAME)-api
+LOCAL_UI   := $(IMAGE_REGISTRY)/$(PROJECT_NAME)-frontend
+
+# Architectures for `make push-multiarch`. Apple silicon builds arm64 by
+# default; most clusters are amd64, and the wrong one fails at runtime with
+# `exec format error`.
+PLATFORMS ?= linux/amd64,linux/arm64
 
 SCYLLA_HOST := localhost
 SCYLLA_PORT := 9042
@@ -96,6 +125,11 @@ NC := \033[0m
 #   make lint     rustfmt check + clippy
 #   make clean    remove build artifacts
 #   make touch    restamp source mtimes -- `build` runs this automatically
+#
+#   make image    build both container images locally (Podman)
+#   make login    log in to Docker Hub
+#   make push     tag the local images and push them to Docker Hub
+#   make release  image + push, in one go
 #
 # Why touch: overlaying a zip or checkout preserves the ARCHIVE's mtimes, so a
 # file you just changed can land with a timestamp OLDER than the artifact built
@@ -533,6 +567,88 @@ image-frontend:
 		-t $(IMAGE_REGISTRY)/$(PROJECT_NAME)-frontend:latest .
 	@printf "$(GREEN)✓ Frontend image built$(NC)\n"
 
+.PHONY: image-docker
+image-docker:
+	@printf "$(CYAN)▶ Building both images with Docker...$(NC)\n"
+	@$(DOCKER) build -f containers/Containerfile.api \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_SHA=$(GIT_SHA) \
+		-t $(LOCAL_API):$(IMAGE_TAG) -t $(LOCAL_API):latest .
+	@$(DOCKER) build -f containers/Containerfile.frontend \
+		-t $(LOCAL_UI):$(IMAGE_TAG) -t $(LOCAL_UI):latest .
+	@printf "$(GREEN)✓ Images built with Docker$(NC)\n"
+
+# ------------------------------------------------------------------------------
+# Docker Hub
+# ------------------------------------------------------------------------------
+
+.PHONY: login
+login:
+	@printf "$(CYAN)▶ Logging in to Docker Hub as $(DOCKERHUB_USER)...$(NC)\n"
+	@printf "  Use a Docker Hub ACCESS TOKEN, not your account password:\n"
+	@printf "  hub.docker.com -> Account Settings -> Personal access tokens\n"
+	@$(PODMAN) login docker.io -u $(DOCKERHUB_USER)
+	@printf "$(GREEN)✓ Logged in$(NC)\n"
+
+.PHONY: push
+push:
+	@printf "$(CYAN)▶ Tagging and pushing to $(REGISTRY)...$(NC)\n"
+	@$(PODMAN) tag $(LOCAL_API):latest $(API_IMAGE):$(IMAGE_TAG)
+	@$(PODMAN) tag $(LOCAL_API):latest $(API_IMAGE):latest
+	@$(PODMAN) tag $(LOCAL_UI):latest  $(UI_IMAGE):$(IMAGE_TAG)
+	@$(PODMAN) tag $(LOCAL_UI):latest  $(UI_IMAGE):latest
+	@$(PODMAN) push $(API_IMAGE):$(IMAGE_TAG)
+	@$(PODMAN) push $(API_IMAGE):latest
+	@$(PODMAN) push $(UI_IMAGE):$(IMAGE_TAG)
+	@$(PODMAN) push $(UI_IMAGE):latest
+	@printf "$(GREEN)✓ Pushed$(NC)\n"
+	@echo ""
+	@echo "  $(API_IMAGE):$(IMAGE_TAG)"
+	@echo "  $(UI_IMAGE):$(IMAGE_TAG)"
+	@echo ""
+	@echo "  Point a chart at them with:"
+	@echo "    image.registry=$(REGISTRY)"
+	@echo "    image.api.repository=$(PROJECT_NAME)-api        image.api.tag=$(IMAGE_TAG)"
+	@echo "    image.frontend.repository=$(PROJECT_NAME)-frontend  image.frontend.tag=$(IMAGE_TAG)"
+	@echo ""
+
+.PHONY: release
+release: image push
+
+# Both architectures in one manifest. Needed for anything that will run on an
+# amd64 cluster when you build on Apple silicon.
+#
+# A multi-arch manifest CANNOT be side-loaded into KinD -- it only exists in a
+# registry. For local KinD work use `make image` + `make kind-load`, which builds
+# and loads the host architecture only.
+#
+# Building linux/amd64 on arm64 runs the compiler under QEMU. The frontend is
+# unaffected (its Containerfile pins the build stage to the host and emits
+# architecture-neutral wasm32), but the API build is slow. Expect it.
+.PHONY: push-multiarch
+push-multiarch:
+	@printf "$(CYAN)▶ Building $(PLATFORMS) manifests...$(NC)\n"
+	@$(PODMAN) manifest rm $(API_IMAGE):$(IMAGE_TAG) 2>/dev/null || true
+	@$(PODMAN) manifest rm $(UI_IMAGE):$(IMAGE_TAG) 2>/dev/null || true
+	@$(PODMAN) build --platform $(PLATFORMS) --manifest $(API_IMAGE):$(IMAGE_TAG) \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_SHA=$(GIT_SHA) \
+		-f containers/Containerfile.api .
+	@$(PODMAN) build --platform $(PLATFORMS) --manifest $(UI_IMAGE):$(IMAGE_TAG) \
+		-f containers/Containerfile.frontend .
+	@$(PODMAN) manifest push --all $(API_IMAGE):$(IMAGE_TAG) docker://$(API_IMAGE):$(IMAGE_TAG)
+	@$(PODMAN) manifest push --all $(UI_IMAGE):$(IMAGE_TAG)  docker://$(UI_IMAGE):$(IMAGE_TAG)
+	@printf "$(GREEN)✓ Multi-arch pushed: $(PLATFORMS)$(NC)\n"
+
+.PHONY: images-show
+images-show:
+	@echo "local:     $(LOCAL_API):latest"
+	@echo "           $(LOCAL_UI):latest"
+	@echo "registry:  $(API_IMAGE):$(IMAGE_TAG)"
+	@echo "           $(UI_IMAGE):$(IMAGE_TAG)"
+
 .PHONY: stack-up
 stack-up:
 	@podman-compose -f containers/podman-compose.yml up -d
@@ -649,10 +765,28 @@ chart-template: chart-sync
 kind-up:
 	@bash deploy/cluster/kind-bootstrap.sh
 
+# FIXED: depended on `images`, which is not a target -- the real one is `image`.
+# Make failed with "No rule to make target 'images'" every time.
+#
+# ALSO CHANGED: `kind load docker-image` reads the DOCKER daemon and cannot see
+# a Podman-built image, even with KIND_EXPERIMENTAL_PROVIDER=podman. Going
+# through an archive works under either runtime.
+#
+# KIND_CLUSTER defaults to the single-cluster setup. For the three-cluster
+# hub/spoke POC, load into each spoke:
+#   make kind-load KIND_CLUSTER=workload-nonprod
+#   make kind-load KIND_CLUSTER=workload-prod
+KIND_CLUSTER ?= drone-ops
+
 .PHONY: kind-load
-kind-load: images
-	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-api:latest --name drone-ops
-	kind load docker-image $(IMAGE_REGISTRY)/$(PROJECT_NAME)-frontend:latest --name drone-ops
+kind-load: image
+	@printf "$(CYAN)▶ Loading images into kind cluster $(KIND_CLUSTER)...$(NC)\n"
+	@$(PODMAN) save -o /tmp/$(PROJECT_NAME)-api.tar  $(LOCAL_API):latest
+	@$(PODMAN) save -o /tmp/$(PROJECT_NAME)-ui.tar   $(LOCAL_UI):latest
+	@kind load image-archive /tmp/$(PROJECT_NAME)-api.tar --name $(KIND_CLUSTER)
+	@kind load image-archive /tmp/$(PROJECT_NAME)-ui.tar  --name $(KIND_CLUSTER)
+	@rm -f /tmp/$(PROJECT_NAME)-api.tar /tmp/$(PROJECT_NAME)-ui.tar
+	@printf "$(GREEN)✓ Loaded into $(KIND_CLUSTER)$(NC)\n"
 
 .PHONY: kind-deploy
 kind-deploy: chart-sync
@@ -670,4 +804,4 @@ kind-status:
 
 .PHONY: kind-down
 kind-down:
-	kind delete cluster --name drone-ops
+	kind delete cluster --name $(KIND_CLUSTER)

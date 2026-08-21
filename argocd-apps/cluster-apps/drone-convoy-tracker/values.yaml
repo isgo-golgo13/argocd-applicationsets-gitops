@@ -8,7 +8,16 @@
 nameOverride: ""
 
 image:
-  registry: ghcr.io/CHANGEME-ORG
+  # Docker Hub. Fully qualified on purpose: Podman has no implicit registry, and
+  # being explicit here means the manifest reads the same wherever it is applied.
+  #
+  # Built and pushed from the application repository:
+  #   make login && make release
+  #
+  # `make push` prints the exact tag it pushed. Pin it in the env overlays --
+  # a floating `latest` makes the cluster's actual state unknowable, and with
+  # pullPolicy IfNotPresent a moved tag may not even be re-pulled.
+  registry: docker.io/isgogolgo13
   api:
     repository: drone-convoy-tracker-api
     tag: ""            # defaults to .Chart.AppVersion
