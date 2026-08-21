@@ -5,6 +5,7 @@ api:
 frontend:
   replicas: 1
 scylla:
+  developerMode: true
   members: 1
   storageCapacity: 5Gi
 scaling:

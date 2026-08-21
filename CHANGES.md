@@ -38,7 +38,15 @@ consumers at it.
 **3. Literal brace directory.** `cluster-addons/scylla-operator/env/{nonprod,preprod,uat,prod}`
 — shell brace expansion that never expanded. Removed.
 
-**4. The app attached to an `https` listener with no certificate path.**
+**4. `developerMode: false` was hardcoded in the ScyllaCluster template.**
+Correct on real hardware and required for a supported ScyllaDB production
+deployment, but impossible on KinD: local-path hands out an overlayfs
+directory, not XFS, so Scylla refuses to start. Now a value, defaulting to
+`false`; `nonprod`, `preprod` and `uat` set it `true`. The `prod` overlay
+deliberately keeps `false` — see the developer-mode box in
+`README-setup-poc.md` step 10 for the KinD accommodation.
+
+**5. The app attached to an `https` listener with no certificate path.**
 Changed to `http`, which is what a laptop demo uses. The prod overlay of
 `platform-gateway` enables TLS with a cert-manager Certificate.
 

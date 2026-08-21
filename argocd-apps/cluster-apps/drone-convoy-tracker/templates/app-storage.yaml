@@ -16,7 +16,15 @@ metadata:
 spec:
   version: {{ .Values.scylla.version | quote }}
   agentVersion: {{ .Values.scylla.agentVersion | quote }}
-  developerMode: false
+  # developerMode relaxes ScyllaDB's production preflight checks (XFS
+  # filesystem, disk IO tuning, dedicated CPUs). FALSE is correct on real
+  # hardware and REQUIRED to be false for a supported production deployment.
+  #
+  # On KinD it must be true. The local-path provisioner hands out an overlayfs
+  # directory, not XFS, and the node has no tuned disk -- Scylla refuses to
+  # start and the pod sits in CrashLoopBackOff with a filesystem complaint that
+  # reads like a bug and is not one.
+  developerMode: {{ .Values.scylla.developerMode }}
   datacenter:
     name: {{ .Values.scylla.datacenter }}
     racks:

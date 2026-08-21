@@ -79,6 +79,10 @@ route:
 # ---------------------------------------------------------------------------
 scylla:
   create: true
+  # See templates/app-storage.yaml. FALSE is the production-correct default.
+  # Non-production overlays set it true; KinD REQUIRES true in every
+  # environment it runs, including one named prod.
+  developerMode: false
   version: "6.2.0"
   agentVersion: "3.4.0"
   datacenter: dc1
