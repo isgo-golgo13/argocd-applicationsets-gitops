@@ -18,9 +18,24 @@ paths:
   addons: argocd-apps/cluster-addons
   apps: argocd-apps/cluster-apps
 
+# ---------------------------------------------------------------------------
+# AppProject wiring.
+#
+# The projects themselves are rendered by ../app-projects/, installed on the hub
+# BEFORE this chart. These are the base names; with perEnvironment true the
+# generated Applications reference "<base>-<cluster>".
+#
+# perEnvironment MUST match app-projects/values.yaml perEnvironment. Disagree
+# and every generated Application names a project that does not exist and sits
+# unsyncable. hack/validate.py checks the two agree.
+# ---------------------------------------------------------------------------
 projects:
+  perEnvironment: true
   addons: cluster-addons
   apps: cluster-apps
+  # Hub-side project for Applications whose destination is ArgoCD itself
+  # (cluster-secrets). Never per-environment -- there is only one hub.
+  bootstrap: platform-bootstrap
 
 # Target clusters. Each entry pairs a cluster with the env overlay file that
 # lives inside every chart at env/<name>/<valuesFile>.
@@ -79,5 +94,38 @@ addonWaves:
 # worked example: it was added with no edit to this file.
 addonDefaultWave: "0"
 
+# ---------------------------------------------------------------------------
+# Addons present in Git but NOT deployed.
+#
+# The directory stays; it is simply excluded from every generator. Reversible in
+# one line, unlike deleting a chart, and it keeps the drop-in property intact
+# for everything else.
+#
+# Two things this is for:
+#   - a hub/spoke topology, where the `argocd` addon must NOT be pushed to the
+#     spokes: ArgoCD lives on the hub only. Excluding it is how a spoke stays a
+#     spoke.
+#   - parking a heavy addon during a proof of concept without losing its chart.
+# ---------------------------------------------------------------------------
+addonExclude: []
+
 # All cluster-apps land after every addon.
 appWave: "10"
+
+# ---------------------------------------------------------------------------
+# Retry policy stamped onto every generated Application.
+#
+# Sync waves order Applications relative to EACH OTHER. They cannot order
+# objects inside ONE Application -- a chart whose CRDs and CRs land in the same
+# sync can still race, and so can a chart with several sibling Helm
+# dependencies. Retry covers that gap.
+#
+# It matters most on a first bootstrap against a brand-new cluster, where
+# nothing is warm and every CRD is being established for the first time.
+# ---------------------------------------------------------------------------
+retry:
+  limit: 5
+  backoff:
+    duration: 10s
+    factor: 2
+    maxDuration: 5m

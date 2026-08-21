@@ -30,5 +30,7 @@ route:
   enabled: false
   host: ""
   gateway:
+    # Rendered by cluster-addons/platform-gateway. Previously nothing created
+    # it, so this route attached to a Gateway that did not exist.
     name: platform-gateway
     namespace: gateway-system

@@ -206,13 +206,22 @@ UI clicks.
 
 ---
 
-### Appendix — VKS/VCF-specific configuration (skippable)
+### Appendix — running this somewhere other than KinD
 
-Nothing in the architecture above is VKS-specific. For deployment on VMware
-Kubernetes Service under VCF 9.x, the deltas are confined to values overlays:
-cluster API endpoints in `app-sets/values.yaml` point at Supervisor-provisioned
-cluster URLs; the `cluster-secrets/` registration Secrets carry VKS kubeconfig
-contexts; storage classes referenced by the ScyllaCluster CR map to vSAN
-policies; and the shared Gateway's LoadBalancer is fulfilled by the VCF
-networking stack (NSX/AVI) rather than a cloud provider. None of these change
-a template — which is the point of keeping environment truth in overlays.
+Nothing in the architecture above is tied to a particular Kubernetes
+distribution. Moving from KinD to EKS or GKE is confined to values overlays:
+
+- **Cluster endpoints** — `app-sets/values.yaml` `clusters[].url` and
+  `app-projects/values.yaml` `environments[].server` carry the real API server
+  addresses. They must be the same literal strings ArgoCD registered the
+  clusters under.
+- **Cluster registration** — `cluster-secrets/` holds the Secrets that register
+  spokes with the hub, instead of `argocd cluster add`.
+- **Storage** — the `storageClassName` the ScyllaCluster CR requests. Empty
+  means the cluster default, which is what KinD uses.
+- **Load balancing** — the shared Gateway's Service is fulfilled by the cloud
+  provider on EKS/GKE, and by whatever you choose on KinD (see
+  README-setup-poc.md).
+
+None of these changes a template, which is the point of keeping environment
+truth in overlays.

@@ -56,8 +56,11 @@ spec:
               values:
                 wave: {{ .wave | quote }}
               directories:
+{{- $excluded := $.Values.addonExclude }}
 {{- range .dirs }}
+{{- if not (has . $excluded) }}
                 - path: {{ $paths.addons }}/{{ . }}
+{{- end }}
 {{- end }}
 {{- end }}
     # --- catch-all: every addon directory not claimed above ---
@@ -79,6 +82,13 @@ spec:
                   exclude: true
 {{- end }}
 {{- end }}
+{{- range .Values.addonExclude }}
+                # Parked by addonExclude in values.yaml -- the directory stays
+                # in Git, it simply is not deployed. Reversible in one line,
+                # unlike deleting the chart.
+                - path: {{ $paths.addons }}/{{ . }}
+                  exclude: true
+{{- end }}
 
   template:
     metadata:
@@ -89,7 +99,7 @@ spec:
         env: '{{ include "appset.cluster" . }}'
         appset.gitops/type: cluster-addons
     spec:
-      project: {{ .Values.projects.addons }}
+      project: '{{ include "appset.addonsProject" $ }}'
       source:
         repoURL: {{ $repo.url }}
         targetRevision: {{ $repo.revision }}
@@ -110,3 +120,16 @@ spec:
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true
+{{- with .Values.retry }}
+        # Sync waves order Applications relative to EACH OTHER. They cannot
+        # order objects inside ONE Application -- a chart whose CRDs and CRs
+        # land in the same sync can still race. Retry covers that gap, and it
+        # is what makes a first bootstrap on a brand-new cluster reliable
+        # rather than a coin flip.
+        retry:
+          limit: {{ .limit }}
+          backoff:
+            duration: {{ .backoff.duration }}
+            factor: {{ .backoff.factor }}
+            maxDuration: {{ .backoff.maxDuration }}
+{{- end }}

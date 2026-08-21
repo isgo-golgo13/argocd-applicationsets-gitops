@@ -47,10 +47,18 @@ frontend:
 gateway:
   # Reference an existing shared Gateway (recommended) or let this chart own one.
   create: false
-  name: cilium-gateway
+  # FIXED: was "cilium-gateway", which no chart in this repository created --
+  # the HTTPRoute attached to a Gateway that did not exist, and Gateway API
+  # fails quietly there: the route applies cleanly and the app is simply
+  # unreachable. The shared Gateway is now owned by
+  # cluster-addons/platform-gateway and is called platform-gateway.
+  name: platform-gateway
   namespace: gateway-system
   className: cilium
-  listener: https
+  # Listener on the shared Gateway to attach to. "http" for a laptop demo with
+  # no certificates; "https" once platform-gateway has TLS enabled for that
+  # environment.
+  listener: http
 
 hostname: drone-convoy-tracker.example.internal
 

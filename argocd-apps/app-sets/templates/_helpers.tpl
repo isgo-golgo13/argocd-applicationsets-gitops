@@ -74,3 +74,37 @@ lives here rather than being repeated per wave group.
   valuesFile: {{ .valuesFile }}
 {{- end }}
 {{- end -}}
+
+{{/*
+---------------------------------------------------------------------------
+Project names.
+
+With projects.perEnvironment true, a generated Application lands in a project
+scoped to ONE destination cluster -- cluster-apps-prod permits only the prod
+server. An Application generated for the wrong cluster is then rejected by
+ArgoCD rather than deployed. That is the AppProject layer earning its keep.
+
+{{.cluster}} is an ArgoCD-side placeholder, so it must survive Helm: hence the
+backticks, same convention as every other placeholder in this file.
+
+MUST agree with app-projects/values.yaml perEnvironment. hack/validate.py
+enforces it -- disagreement means Applications naming projects that do not
+exist, which presents as every Application stuck at "project does not exist".
+---------------------------------------------------------------------------
+*/}}
+
+{{- define "appset.addonsProject" -}}
+{{- if .Values.projects.perEnvironment -}}
+{{ printf "%s-" .Values.projects.addons }}{{ `{{.cluster}}` }}
+{{- else -}}
+{{ .Values.projects.addons }}
+{{- end -}}
+{{- end -}}
+
+{{- define "appset.appsProject" -}}
+{{- if .Values.projects.perEnvironment -}}
+{{ printf "%s-" .Values.projects.apps }}{{ `{{.cluster}}` }}
+{{- else -}}
+{{ .Values.projects.apps }}
+{{- end -}}
+{{- end -}}
