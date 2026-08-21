@@ -1,0 +1,21 @@
+apiVersion: v2
+name: platform-gateway
+description: >-
+  The shared Gateway API Gateway that every HTTPRoute in this repository
+  parents to, plus the namespace it lives in.
+
+  This addon exists because nothing else created it. The argocd addon's route
+  and the drone-convoy-tracker chart both reference a Gateway in
+  gateway-system, under two different names, and neither chart owns it -- so an
+  HTTPRoute attached to nothing was the actual behaviour on a fresh cluster.
+
+  Cluster-scoped CRDs (gateway.networking.k8s.io) are NOT installed here: they
+  are a prerequisite of the CNI install, because Cilium's Gateway API support
+  requires them to be present before Cilium starts. See README-setup-poc.md.
+type: application
+version: 1.0.0
+appVersion: "1.0"
+
+# No dependency. A Gateway is a handful of lines; wrapping an upstream chart to
+# get one would be more moving parts, not fewer.
+dependencies: []

@@ -1,0 +1,6 @@
+# Environment overlay: preprod.
+#
+# Thin by design -- anything identical across environments belongs in
+# ../../values.yaml.
+gateway:
+  hostname: "*.preprod.example.internal"

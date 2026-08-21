@@ -1,0 +1,49 @@
+{{- if .Values.bootstrapProject.enabled }}
+{{- /*
+---------------------------------------------------------------------------
+The hub-side bootstrap project.
+
+Home for Applications whose destination is the ArgoCD hub itself rather than a
+workload cluster:
+
+  - the app-of-apps root Application (argocd-apps-aoa/bootstrap/)
+  - optionally, an Application that manages this chart, once the project layer
+    is self-hosting
+
+Scoped to the in-cluster endpoint and the argocd namespace. Nothing in this
+project can reach a workload cluster -- correct blast radius for something
+whose job is to create other Applications.
+
+Note the whitelist: argoproj.io kinds only. An Application in this project can
+create Applications, ApplicationSets and AppProjects, and nothing else.
+---------------------------------------------------------------------------
+*/ -}}
+{{- $b := .Values.bootstrapProject }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $b.name }}
+  namespace: {{ .Values.argocdNamespace }}
+  labels:
+    {{- include "proj.labels" . | nindent 4 }}
+    gitops.example.com/layer: bootstrap
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: {{ $b.description }}
+  sourceRepos:
+    {{- toYaml .Values.sourceRepos | nindent 4 }}
+  destinations:
+    {{- range $ns := $b.namespaces }}
+    - namespace: {{ $ns | quote }}
+      server: {{ $b.server | quote }}
+    {{- end }}
+  clusterResourceWhitelist:
+    {{- if $b.clusterResourceWhitelist }}
+    {{- toYaml $b.clusterResourceWhitelist | nindent 4 }}
+    {{- else }}
+    []
+    {{- end }}
+  namespaceResourceWhitelist:
+    {{- toYaml $b.namespaceResourceWhitelist | nindent 4 }}
+{{- end }}

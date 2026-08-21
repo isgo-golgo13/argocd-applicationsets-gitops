@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------------------
+# KinD cluster 3 of 3 -- WORKLOAD SPOKE "prod".
+#
+# NO ArgoCD runs here. The hub reaches in and applies manifests; this cluster
+# has no idea GitOps exists. That is the point of hub and spoke: one control
+# plane, many managed clusters, and a spoke that can be rebuilt from nothing.
+#
+#   kind create cluster --config poc/kind/spoke-prod.yaml
+#
+# TWO SETTINGS THAT MATTER, both required by Cilium:
+#
+#   disableDefaultCNI: true
+#     kindnet is not installed, so the nodes stay NotReady until Cilium is
+#     installed. That is expected -- do not debug it.
+#
+#   kubeProxyMode: none
+#     Cilium replaces kube-proxy. Cilium must then be installed with
+#     kubeProxyReplacement=true, or nothing resolves a Service.
+#
+# Gateway API needs its CRDs installed BEFORE Cilium starts, because Cilium
+# only enables Gateway API support if it finds them. See README-setup-poc.md.
+#
+# Ports 8082/8444 are mapped so the Rust app is reachable from the host
+# without a LoadBalancer implementation.
+# ---------------------------------------------------------------------------
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: workload-prod
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: none
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "gitops.example.com/role=spoke,gitops.example.com/env=prod"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8082
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 8444
+        protocol: TCP
+  - role: worker

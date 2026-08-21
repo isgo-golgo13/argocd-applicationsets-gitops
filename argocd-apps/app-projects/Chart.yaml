@@ -1,0 +1,23 @@
+apiVersion: v2
+name: app-projects
+description: >-
+  The AppProject layer -- the governance envelope every generated Application
+  is evaluated against.
+
+  Installed on the ARGO CD HUB, once, BEFORE app-sets. Renders one project per
+  layer per environment so an Application generated for nonprod cannot be
+  synced into prod.
+
+  Split out of cluster-addons/argocd/ for a reason that is not organisational:
+  while the projects lived inside an addon chart, that addon's own Application
+  referenced a project the same Application was supposed to create. On a clean
+  cluster that is a deadlock -- and a KinD cluster is always clean. See
+  values.yaml.
+type: application
+version: 1.0.0
+appVersion: "1.0"
+
+# No dependencies. AppProject is a first-party ArgoCD CRD installed by the
+# argo-cd chart, which is why the ordering note in values.yaml matters: this
+# chart's objects need ArgoCD's CRDs to already exist on the hub.
+dependencies: []

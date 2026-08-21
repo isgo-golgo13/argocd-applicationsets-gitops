@@ -1,0 +1,93 @@
+{{- /*
+---------------------------------------------------------------------------
+The AppProjects.
+
+One per layer (addons, apps) per environment when perEnvironment is true,
+which is the recommended posture: each project permits exactly ONE destination
+server, so an Application generated for dev cannot be synced into prod even if
+the generator is wrong.
+
+sourceRepos, destinations and the resource whitelists are the four controls
+that actually contain a mistake. The resource whitelists differ sharply
+between the two layers, and deliberately -- see values.yaml.
+---------------------------------------------------------------------------
+*/ -}}
+{{- $root := . -}}
+{{- $envs := .Values.perEnvironment | ternary .Values.environments (list (dict "name" "" "server" "*")) -}}
+{{- range $layerKey, $layer := .Values.projects }}
+{{- range $env := $envs }}
+{{- $name := include "proj.name" (dict "ctx" $root "base" $layer.name "env" $env.name) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Values.argocdNamespace }}
+  labels:
+    {{- include "proj.labels" $root | nindent 4 }}
+    gitops.example.com/layer: {{ $layerKey }}
+    {{- if $root.Values.perEnvironment }}
+    gitops.example.com/environment: {{ $env.name }}
+    {{- end }}
+  finalizers:
+    # Blocks deletion of a project that still has Applications in it, rather
+    # than orphaning them into an unmanaged state.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  {{- if $root.Values.perEnvironment }}
+  description: {{ printf "%s Scoped to %s." $layer.description $env.name | quote }}
+  {{- else }}
+  description: {{ $layer.description | quote }}
+  {{- end }}
+
+  sourceRepos:
+    {{- toYaml $root.Values.sourceRepos | nindent 4 }}
+
+  destinations:
+    {{- range $ns := $layer.destinationNamespaces }}
+    - namespace: {{ $ns | quote }}
+      server: {{ $env.server | quote }}
+    {{- end }}
+
+  clusterResourceWhitelist:
+    {{- if $layer.clusterResourceWhitelist }}
+    {{- toYaml $layer.clusterResourceWhitelist | nindent 4 }}
+    {{- else }}
+    []
+    {{- end }}
+
+  namespaceResourceWhitelist:
+    {{- toYaml $layer.namespaceResourceWhitelist | nindent 4 }}
+
+  {{- with $layer.clusterResourceBlacklist }}
+  clusterResourceBlacklist:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  {{- with $layer.namespaceResourceBlacklist }}
+  namespaceResourceBlacklist:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  {{- with $layer.orphanedResources }}
+  orphanedResources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+
+  {{- if and $root.Values.perEnvironment $env.name }}
+  {{- $sw := index $root.Values.syncWindows $env.name | default dict }}
+  {{- if and $sw.enabled $sw.windows }}
+  syncWindows:
+    {{- toYaml $sw.windows | nindent 4 }}
+  {{- end }}
+  {{- end }}
+
+  {{- if $root.Values.roles.enabled }}
+  {{- $r := index $root.Values.roles $layerKey | default list }}
+  {{- if $r }}
+  roles:
+    {{- toYaml $r | nindent 4 }}
+  {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

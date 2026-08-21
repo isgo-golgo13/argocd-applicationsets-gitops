@@ -1,0 +1,6 @@
+# Environment overlay: nonprod.
+#
+# Thin by design -- anything identical across environments belongs in
+# ../../values.yaml.
+gateway:
+  hostname: "*.nonprod.example.internal"

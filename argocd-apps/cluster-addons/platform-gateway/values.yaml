@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# cluster-addons/platform-gateway/values.yaml -- COMMON base.
+#
+# ONE Gateway, owned by the platform, that every HTTPRoute in the repo attaches
+# to. Routes live in their own namespaces and cross the boundary via
+# allowedRoutes; they never declare their own Gateway.
+#
+# WHY THAT MATTERS: a Gateway is where the load balancer address and the
+# wildcard certificate live. An application team creating or deleting one takes
+# the front door with it. Platform owns the Gateway, apps own their routes.
+#
+# ===========================================================================
+# THE BUG THIS ADDON FIXES
+#
+# Before this chart existed:
+#   cluster-addons/argocd/values.yaml   route.gateway.name: platform-gateway
+#   cluster-apps/drone-convoy-tracker   gateway.name: cilium-gateway
+#
+# Two different names, both in a gateway-system namespace, and NO chart
+# created either one. On a fresh cluster the HTTPRoutes were created and
+# attached to nothing. Gateway API fails quietly here -- the route reports a
+# parent that does not exist and the app is simply unreachable, with no error
+# in the Application's sync status because the HTTPRoute object itself applied
+# fine.
+#
+# Both consumers now point at THIS Gateway, by the one name below.
+#
+# ===========================================================================
+# PREREQUISITE: the Gateway API CRDs
+#
+# Not installed by this chart. Cilium's Gateway API support requires the CRDs
+# to exist BEFORE Cilium starts, so they are part of the CNI bootstrap, which
+# happens before ArgoCD exists. Installing them here would be too late.
+#
+#   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+#
+# In an air-gapped or change-controlled estate, vendor that manifest into this
+# chart's crds/ directory instead: Helm does not template crds/, and ArgoCD
+# renders with --include-crds so they re-apply on every sync -- which also
+# closes Helm's "CRDs are never updated after first install" gap.
+# ---------------------------------------------------------------------------
+
+namespace: gateway-system
+
+gateway:
+  name: platform-gateway
+
+  # Cilium's Gateway API implementation. The GatewayClass is created by Cilium
+  # itself when gatewayAPI.enabled=true; this only references it.
+  #
+  #   kubectl get gatewayclass
+  #   -> cilium   io.cilium/gateway-controller   True
+  #
+  # If that command returns nothing, Cilium was installed without Gateway API
+  # support and this Gateway will sit Unaccepted forever.
+  className: cilium
+
+  # Hostname the listeners serve. A wildcard lets any route attach a subdomain
+  # without touching the Gateway.
+  hostname: "*.example.internal"
+
+  listeners:
+    # Plain HTTP. Kept enabled because it is what a laptop demo actually uses --
+    # no certificate, no DNS, just a host header. In a real estate this listener
+    # exists to redirect to https and nothing else.
+    http:
+      enabled: true
+      port: 80
+
+    # TLS. Requires a certificate Secret in this namespace. cert-manager can
+    # issue it, but that is a second moving part, so it is off by default and
+    # turned on per environment.
+    https:
+      enabled: false
+      port: 443
+      # Secret holding the listener certificate, in this namespace.
+      tlsSecretName: platform-gateway-tls
+
+  # Which namespaces may attach routes.
+  #   All      any namespace -- correct while the routing namespaces are still
+  #            being decided
+  #   Selector tighten to labelled namespaces once that set is known
+  allowedRoutesFrom: All
+
+  # Extra annotations on the Gateway. Where an ExternalDNS hostname annotation
+  # or a cloud load balancer annotation would go on EKS/GKE.
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# cert-manager Certificate for the https listener.
+#
+# Off by default and only meaningful when listeners.https.enabled is true.
+# Requires cert-manager (sync wave -2, so already reconciled by the time this
+# addon syncs) and a ClusterIssuer that actually exists.
+# ---------------------------------------------------------------------------
+certificate:
+  enabled: false
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.example.internal"

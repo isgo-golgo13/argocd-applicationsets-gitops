@@ -1,0 +1,90 @@
+{{- /*
+---------------------------------------------------------------------------
+The shared platform Gateway.
+
+The Application's destination namespace is this chart's directory basename
+(platform-gateway), but the Gateway belongs in gateway-system, which is where
+both consumers already look for it. So the namespace is rendered here
+explicitly rather than relying on CreateNamespace.
+
+ORDERING: this addon has no explicit sync wave, so it lands in
+addonDefaultWave (0) -- after cert-manager at -2, which the https listener's
+certificate needs. cluster-apps land at wave 10, so every HTTPRoute is created
+after this Gateway exists. That ordering is why a route never attaches to
+nothing.
+---------------------------------------------------------------------------
+*/ -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: gitops-platform
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.gateway.name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: gitops-platform
+  {{- with .Values.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    {{- if .Values.gateway.listeners.http.enabled }}
+    - name: http
+      protocol: HTTP
+      port: {{ .Values.gateway.listeners.http.port }}
+      hostname: {{ .Values.gateway.hostname | quote }}
+      allowedRoutes:
+        namespaces:
+          from: {{ .Values.gateway.allowedRoutesFrom }}
+    {{- end }}
+    {{- if .Values.gateway.listeners.https.enabled }}
+    - name: https
+      protocol: HTTPS
+      port: {{ .Values.gateway.listeners.https.port }}
+      hostname: {{ .Values.gateway.hostname | quote }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: {{ .Values.gateway.listeners.https.tlsSecretName }}
+      allowedRoutes:
+        namespaces:
+          from: {{ .Values.gateway.allowedRoutesFrom }}
+    {{- end }}
+    {{- if not (or .Values.gateway.listeners.http.enabled .Values.gateway.listeners.https.enabled) }}
+    {{- fail "platform-gateway: at least one listener must be enabled" }}
+    {{- end }}
+{{- if .Values.certificate.enabled }}
+---
+{{- /*
+cert-manager issues the listener certificate directly into the Secret the
+https listener references. cert-manager is sync wave -2 and this addon is
+wave 0, so the CRDs and the controller are already reconciled.
+
+If the Certificate stays in a "not ready" state, check the ClusterIssuer
+exists -- a Certificate referencing a missing issuer waits silently rather
+than failing.
+*/ -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.listeners.https.tlsSecretName }}
+  namespace: {{ .Values.namespace }}
+spec:
+  secretName: {{ .Values.gateway.listeners.https.tlsSecretName }}
+  issuerRef:
+    name: {{ .Values.certificate.issuerRef.name }}
+    kind: {{ .Values.certificate.issuerRef.kind }}
+  dnsNames:
+    {{- toYaml .Values.certificate.dnsNames | nindent 4 }}
+{{- end }}

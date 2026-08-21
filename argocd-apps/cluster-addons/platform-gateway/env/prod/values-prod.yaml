@@ -1,0 +1,17 @@
+# Environment overlay: prod.
+#
+# Thin by design -- anything identical across environments belongs in
+# ../../values.yaml.
+gateway:
+  # Production serves the apex wildcard, not a per-environment subdomain.
+  hostname: "*.example.internal"
+  listeners:
+    https:
+      enabled: true
+
+# Real certificate in production. Requires a ClusterIssuer that exists --
+# check `kubectl get clusterissuer` before enabling.
+certificate:
+  enabled: true
+  dnsNames:
+    - "*.example.internal"

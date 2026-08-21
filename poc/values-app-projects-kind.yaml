@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# poc/values-app-projects-kind.yaml
+#
+# Overlay for the three-cluster KinD proof of concept:
+#
+#   helm upgrade --install app-projects argocd-apps/app-projects \
+#     -n argocd -f poc/values-app-projects-kind.yaml
+#
+# INSTALL THIS BEFORE app-sets. ArgoCD refuses to sync an Application whose
+# project does not exist.
+# ---------------------------------------------------------------------------
+
+sourceRepos:
+  # MUST match poc/values-app-sets-kind.yaml repo.url. A mismatch shows up as
+  # "application repo ... is not permitted in project" on every Application,
+  # which reads like a credentials problem and is not one.
+  - https://github.com/CHANGEME-ORG/*
+
+# ---------------------------------------------------------------------------
+# Two environments, two servers.
+#
+# These MUST be the same literal strings as the cluster URLs in
+# poc/values-app-sets-kind.yaml. ArgoCD compares them as text, not by
+# resolving them -- https://10.89.0.3:6443 and https://10.89.0.3:6443/ are two
+# different destinations as far as an AppProject is concerned.
+#
+# Fill in the same Docker network addresses. See README-setup-poc.md step 6.
+# ---------------------------------------------------------------------------
+environments:
+  - name: nonprod
+    server: https://REPLACE-ME-NONPROD-IP:6443
+  - name: prod
+    server: https://REPLACE-ME-PROD-IP:6443
+
+# ---------------------------------------------------------------------------
+# THIS IS THE SETTING THE DEMO IS ABOUT.
+#
+# true renders four projects instead of two:
+#
+#   cluster-addons-nonprod   permits ONLY the nonprod server
+#   cluster-addons-prod      permits ONLY the prod server
+#   cluster-apps-nonprod     permits ONLY the nonprod server, *-* namespaces,
+#                            and NO cluster-scoped resources
+#   cluster-apps-prod        same, prod only
+#
+# plus platform-bootstrap for hub-side Applications.
+#
+# To show what it buys you: set the nonprod cluster URL to the PROD server,
+# reinstall app-sets, and watch ArgoCD refuse to sync rather than deploying
+# nonprod's manifests into prod. Flip this to false and the same mistake
+# succeeds. That contrast is the whole argument for the AppProject layer.
+# ---------------------------------------------------------------------------
+perEnvironment: true
+
+# Nothing is frozen during a demo.
+syncWindows:
+  nonprod:
+    enabled: false
+    windows: []
+  prod:
+    enabled: false
+    windows: []

@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------
+# poc/values-app-sets-kind.yaml
+#
+# Overlay for the three-cluster KinD proof of concept. Layered on top of
+# argocd-apps/app-sets/values.yaml:
+#
+#   helm upgrade --install app-sets argocd-apps/app-sets \
+#     -n argocd -f poc/values-app-sets-kind.yaml
+#
+# Only the deltas are here. Everything else -- sync waves, generators, the
+# drop-in glob -- is unchanged from the shipped values, which is the point:
+# the POC is a different CLUSTER LIST, not a different architecture.
+# ---------------------------------------------------------------------------
+
+repo:
+  # CHANGE ME to your fork before running the POC. This must also match
+  # sourceRepos in poc/values-app-projects-kind.yaml, or every Application is
+  # rejected by its project with "not permitted in project".
+  url: https://github.com/CHANGEME-ORG/argocd-applicationsets-gitops
+  revision: HEAD
+
+# ---------------------------------------------------------------------------
+# Two spokes. The hub is NOT in this list -- nothing is deployed to it.
+#
+# THE URLs BELOW ARE PLACEHOLDERS AND WILL NOT WORK AS WRITTEN.
+#
+# ArgoCD matches destination.server as a literal string against the cluster it
+# registered. For a KinD spoke that is the Docker network address of the
+# spoke's control-plane container, because the hub reaches the spoke over the
+# shared `kind` Docker network -- NOT 127.0.0.1, which inside the hub's own
+# container means the hub itself.
+#
+# Get the real values:
+#
+#   docker inspect workload-nonprod-control-plane \
+#     --format '{{ (index .NetworkSettings.Networks "kind").IPAddress }}'
+#
+# then use https://<that-ip>:6443. README-setup-poc.md step 6 walks through it
+# and includes a one-liner that writes this file for you.
+# ---------------------------------------------------------------------------
+clusters:
+  - name: nonprod
+    url: https://REPLACE-ME-NONPROD-IP:6443
+    valuesFile: values-nonprod.yaml
+
+  - name: prod
+    url: https://REPLACE-ME-PROD-IP:6443
+    valuesFile: values-prod.yaml
+
+# ---------------------------------------------------------------------------
+# The POC addon subset.
+#
+# Every addon directory not listed here is still in Git and still globbed by
+# the generator -- these are excluded from deployment only.
+#
+# DEPLOYED on the spokes:
+#   cert-manager       wave -2   issues the ScyllaDB operator's webhook cert
+#   external-secrets   wave -2   secret delivery
+#   kyverno            wave -1   policy
+#   keda               wave -1   autoscaling
+#   scylla-operator    wave -1   REQUIRED -- the Rust app's database
+#   platform-gateway   wave  0   the shared Gateway every HTTPRoute attaches to
+#
+# EXCLUDED, and why:
+#   argocd        THE IMPORTANT ONE. ArgoCD lives on the hub. Pushing it to a
+#                 spoke would make the spoke a second control plane and destroy
+#                 the demonstration. Excluding it is how a spoke stays a spoke.
+#   sealed-secrets, crossplane, vault, goldilocks, kargo, external-dns
+#                 all install fine, none is needed to run the Rust app, and
+#                 each is another thing to wait for on a laptop. Delete a line
+#                 to add one back.
+# ---------------------------------------------------------------------------
+addonExclude:
+  - argocd
+  - sealed-secrets
+  - crossplane
+  - vault
+  - goldilocks
+  - kargo
+  - external-dns

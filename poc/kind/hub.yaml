@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# KinD cluster 1 of 3 -- the GitOps HUB.
+#
+# Runs ArgoCD and nothing else. No application workloads, no Cilium Gateway,
+# no addons. Its whole job is to hold Applications, ApplicationSets and
+# AppProjects, and to reach out to the two spokes.
+#
+#   kind create cluster --config poc/kind/hub.yaml
+#
+# Default CNI is fine here: nothing on the hub uses Gateway API. Keeping the
+# hub on kindnet is itself a demonstration -- the control plane does not need
+# to look like the clusters it manages.
+#
+# 30080 is mapped so the ArgoCD UI is reachable at http://localhost:8080
+# without port-forward. Port-forward still works and the tutorial uses it,
+# because it is one less thing to explain.
+# ---------------------------------------------------------------------------
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gitops-hub
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "gitops.example.com/role=hub"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
